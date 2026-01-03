@@ -407,6 +407,7 @@ class GameObjectEditor:
         self.map_entities = []  # List of entities (monsters) on the map: [(x, y, object_id), ...]
         self.map_rooms = []  # List of rooms: [(x, y, width, height), ...]
         self.map_zoom_level = 1.0  # Zoom level for map (1.0 = 100%)
+        self.map_stairs_position = None  # Position of stairs (goal)
         
         # Configure grid weights for map tab
         self.map_tab.columnconfigure(2, weight=1)
@@ -1516,7 +1517,7 @@ class GameObjectEditor:
                     tile_row.append(tile_id)
                 self.map_data.append(tile_row)
             
-            # Parse entities (monsters)
+            # Parse entities (monsters + player)
             entities_data = data.get("entities", [])
             self.map_entities = []
             for entity in entities_data:
@@ -1527,10 +1528,16 @@ class GameObjectEditor:
                     "sprite_x": entity.get("sprite_x", 0),
                     "sprite_y": entity.get("sprite_y", 0),
                     "sprite_sheet": entity.get("sprite_sheet"),
+                    "controller": entity.get("controller", "AI"),  # "Player" or "AI"
                 })
             
+            # Store stairs position
+            self.map_stairs_position = data.get("stairs_position")
+            
             self.render_map()
-            self.log_status(f"Generated map: {self.map_width}x{self.map_height} with {len(self.map_entities)} monsters", "success")
+            num_monsters = sum(1 for e in self.map_entities if e.get("controller") == "AI")
+            num_players = sum(1 for e in self.map_entities if e.get("controller") == "Player")
+            self.log_status(f"Generated map: {self.map_width}x{self.map_height} with {num_monsters} monsters and {num_players} player(s)", "success")
         except Exception as e:
             self.log_status(f"Failed to generate map: {e}", "error")
     
@@ -1676,7 +1683,7 @@ class GameObjectEditor:
                         fill=color, outline="black"
                     )
         
-        # Render entities (monsters) on top of tiles
+        # Render entities (monsters + player) on top of tiles
         for entity in self.map_entities:
             entity_x = entity.get("x", 0)
             entity_y = entity.get("y", 0)
@@ -1684,6 +1691,7 @@ class GameObjectEditor:
             sprite_x = entity.get("sprite_x", 0)
             sprite_y = entity.get("sprite_y", 0)
             sprite_sheet = entity.get("sprite_sheet")
+            controller = entity.get("controller", "AI")  # "Player" or "AI"
             
             # Find the entity object
             entity_obj = None
@@ -1718,33 +1726,128 @@ class GameObjectEditor:
                                 entity_x * scaled_size, entity_y * scaled_size,
                                 anchor=tk.NW, image=sprite_photo
                             )
+                            # Add colored border to distinguish player (green) from monsters (red)
+                            if controller == "Player":
+                                self.map_canvas.create_rectangle(
+                                    entity_x * scaled_size, entity_y * scaled_size,
+                                    (entity_x + 1) * scaled_size, (entity_y + 1) * scaled_size,
+                                    outline="lime", width=max(2, int(3 * self.map_zoom_level))
+                                )
                         except Exception as e:
                             # Fallback: draw a colored circle for entity (scaled by zoom)
                             scaled_size = int(self.tile_size * self.map_zoom_level)
                             offset = max(1, int(4 * self.map_zoom_level))
+                            # Use green for player, red for monsters
+                            color = "green" if controller == "Player" else "red"
+                            outline_color = "darkgreen" if controller == "Player" else "darkred"
                             self.map_canvas.create_oval(
                                 entity_x * scaled_size + offset, entity_y * scaled_size + offset,
                                 (entity_x + 1) * scaled_size - offset, (entity_y + 1) * scaled_size - offset,
-                                fill="red", outline="darkred", width=max(1, int(2 * self.map_zoom_level))
+                                fill=color, outline=outline_color, width=max(1, int(2 * self.map_zoom_level))
                             )
                     else:
                         # Fallback: draw a colored circle for entity (scaled by zoom)
                         scaled_size = int(self.tile_size * self.map_zoom_level)
                         offset = max(1, int(4 * self.map_zoom_level))
+                        # Use green for player, red for monsters
+                        color = "green" if controller == "Player" else "red"
+                        outline_color = "darkgreen" if controller == "Player" else "darkred"
                         self.map_canvas.create_oval(
                             entity_x * scaled_size + offset, entity_y * scaled_size + offset,
                             (entity_x + 1) * scaled_size - offset, (entity_y + 1) * scaled_size - offset,
-                            fill="red", outline="darkred", width=max(1, int(2 * self.map_zoom_level))
+                            fill=color, outline=outline_color, width=max(1, int(2 * self.map_zoom_level))
                         )
                 else:
                     # Fallback: draw a colored circle for entity (scaled by zoom)
                     scaled_size = int(self.tile_size * self.map_zoom_level)
                     offset = max(1, int(4 * self.map_zoom_level))
+                    # Use green for player, red for monsters
+                    color = "green" if controller == "Player" else "red"
+                    outline_color = "darkgreen" if controller == "Player" else "darkred"
                     self.map_canvas.create_oval(
                         entity_x * scaled_size + offset, entity_y * scaled_size + offset,
                         (entity_x + 1) * scaled_size - offset, (entity_y + 1) * scaled_size - offset,
-                        fill="red", outline="darkred", width=max(1, int(2 * self.map_zoom_level))
+                        fill=color, outline=outline_color, width=max(1, int(2 * self.map_zoom_level))
                     )
+        
+        # Render stairs (goal object) on top of everything
+        if self.map_stairs_position and isinstance(self.map_stairs_position, list) and len(self.map_stairs_position) == 2:
+            stairs_x = self.map_stairs_position[0]
+            stairs_y = self.map_stairs_position[1]
+            scaled_size = int(self.tile_size * self.map_zoom_level)
+            dest_x = stairs_x * scaled_size
+            dest_y = stairs_y * scaled_size
+            
+            # Find stairs object to get sprite info
+            stairs_obj = None
+            for obj in self.config.get("game_objects", []):
+                if obj.get("id") == "stairs":
+                    stairs_obj = obj
+                    break
+            
+            if stairs_obj:
+                sprite_sheet = stairs_obj.get("sprite_sheet", "tiles.png")
+                sprites = stairs_obj.get("sprites", [])
+                if sprites:
+                    sprite = sprites[0]
+                    sprite_x = sprite.get("x", 7)
+                    sprite_y = sprite.get("y", 16)
+                else:
+                    sprite_x = 7
+                    sprite_y = 16
+                
+                # Load and render stairs sprite
+                sheet_path = self.assets_dir / sprite_sheet
+                if sheet_path.exists():
+                    try:
+                        img = Image.open(sheet_path)
+                        left = sprite_x * self.tile_size
+                        top = sprite_y * self.tile_size
+                        right = left + self.tile_size
+                        bottom = top + self.tile_size
+                        
+                        sprite_img = img.crop((left, top, right, bottom))
+                        sprite_img = sprite_img.resize((scaled_size, scaled_size), Image.NEAREST)
+                        sprite_photo = ImageTk.PhotoImage(sprite_img)
+                        
+                        # Store reference
+                        if not hasattr(self, '_map_sprite_images'):
+                            self._map_sprite_images = []
+                        self._map_sprite_images.append(sprite_photo)
+                        
+                        # Draw stairs
+                        self.map_canvas.create_image(
+                            dest_x, dest_y,
+                            anchor=tk.NW, image=sprite_photo
+                        )
+                        
+                        # Add bright cyan border to make stairs visible
+                        self.map_canvas.create_rectangle(
+                            dest_x, dest_y,
+                            dest_x + scaled_size, dest_y + scaled_size,
+                            outline="cyan", width=max(2, int(3 * self.map_zoom_level))
+                        )
+                    except Exception as e:
+                        # Fallback: draw bright yellow rectangle with cyan border
+                        self.map_canvas.create_rectangle(
+                            dest_x, dest_y,
+                            dest_x + scaled_size, dest_y + scaled_size,
+                            fill="yellow", outline="cyan", width=max(2, int(3 * self.map_zoom_level))
+                        )
+                else:
+                    # Fallback: draw bright yellow rectangle with cyan border
+                    self.map_canvas.create_rectangle(
+                        dest_x, dest_y,
+                        dest_x + scaled_size, dest_y + scaled_size,
+                        fill="yellow", outline="cyan", width=max(2, int(3 * self.map_zoom_level))
+                    )
+            else:
+                # Fallback: draw bright yellow rectangle with cyan border
+                self.map_canvas.create_rectangle(
+                    dest_x, dest_y,
+                    dest_x + scaled_size, dest_y + scaled_size,
+                    fill="yellow", outline="cyan", width=max(2, int(3 * self.map_zoom_level))
+                )
         
         # Update scroll region
         self.map_canvas.config(scrollregion=self.map_canvas.bbox("all"))

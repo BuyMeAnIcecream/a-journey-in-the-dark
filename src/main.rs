@@ -124,11 +124,15 @@ async fn generate_map_endpoint() -> Json<GameUpdate> {
 
     let tile_registry = tile_registry::TileRegistry::load_from_config(&config);
     let object_registry = game_object_registry::GameObjectRegistry::load_from_config(&config);
-    let game_state = GameState::new_with_registry(tile_registry, object_registry);
+    let mut game_state = GameState::new_with_registry(tile_registry, object_registry);
     
-    // Convert entities to EntityData (only monsters, no players)
+    // Add a preview player for the map editor
+    let preview_player_id = "preview_player".to_string();
+    game_state.add_player(preview_player_id.clone());
+    
+    // Convert entities to EntityData (monsters + preview player)
     let entities: Vec<EntityData> = game_state.entities.iter()
-        .filter(|e| e.is_alive() && matches!(e.controller, crate::game::EntityController::AI))
+        .filter(|e| e.is_alive())
         .map(|entity| {
             let obj = game_state.object_registry.get_object(&entity.object_id);
             let (sprite_x, sprite_y) = obj
@@ -153,6 +157,11 @@ async fn generate_map_endpoint() -> Json<GameUpdate> {
         })
         .collect();
     
+    // Check if preview player is on stairs
+    let on_stairs = game_state.stairs_position.map_or(false, |(sx, sy)| {
+        game_state.entities.iter().any(|e| e.id == preview_player_id && e.x == sx && e.y == sy)
+    });
+    
     Json(GameUpdate {
         map: game_state.dungeon.tiles.clone(),
         entities,
@@ -160,7 +169,7 @@ async fn generate_map_endpoint() -> Json<GameUpdate> {
         height: game_state.dungeon.height,
         messages: Vec::new(),
         stairs_position: game_state.stairs_position,
-        on_stairs: false,
+        on_stairs,
         level_complete: false,
     })
 }
