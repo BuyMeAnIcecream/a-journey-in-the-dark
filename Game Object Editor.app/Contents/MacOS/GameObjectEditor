@@ -1,0 +1,11 @@
+#!/bin/bash
+# Get the directory where this script is located
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+PROJECT_ROOT="$( cd "$SCRIPT_DIR/../../.." && pwd )"
+
+# Change to the tools directory
+cd "$PROJECT_ROOT/tools"
+
+# Run the Python editor
+python3 game_object_editor.py
+
