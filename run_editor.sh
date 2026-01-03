@@ -1,12 +1,13 @@
 #!/bin/bash
-# Simple script to run the game object editor
+# Simple launcher script for the game object editor
+# Can be run from anywhere in the project
 
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
-cd "$SCRIPT_DIR"
+TOOLS_DIR="$SCRIPT_DIR/tools"
 
 # Find python3
 PYTHON3=""
-for path in "/usr/bin/python3" "/usr/local/bin/python3" "/opt/homebrew/bin/python3"; do
+for path in "/usr/bin/python3" "/usr/local/bin/python3" "/opt/homebrew/bin/python3" "/Library/Frameworks/Python.framework/Versions/3.13/bin/python3"; do
     if [ -f "$path" ]; then
         PYTHON3="$path"
         break
@@ -23,7 +24,7 @@ if [ -z "$PYTHON3" ] || [ ! -f "$PYTHON3" ]; then
 fi
 
 # Set up virtual environment
-VENV_DIR="$SCRIPT_DIR/venv"
+VENV_DIR="$TOOLS_DIR/venv"
 VENV_PYTHON="$VENV_DIR/bin/python3"
 
 # Create venv if it doesn't exist
@@ -36,10 +37,10 @@ fi
 if ! "$VENV_PYTHON" -c "import toml" 2>/dev/null; then
     echo "Installing dependencies..."
     "$VENV_PYTHON" -m pip install --upgrade pip --quiet
-    "$VENV_PYTHON" -m pip install -r requirements.txt || exit 1
+    "$VENV_PYTHON" -m pip install -r "$TOOLS_DIR/requirements.txt" || exit 1
 fi
 
-# Run the editor using venv
+# Change to tools directory and run
+cd "$TOOLS_DIR" || exit 1
 "$VENV_PYTHON" game_object_editor.py
-
 

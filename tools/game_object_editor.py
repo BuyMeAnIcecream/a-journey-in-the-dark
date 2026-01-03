@@ -747,10 +747,35 @@ class GameObjectEditor:
         """Remove selected sprite from list"""
         selection = self.sprite_listbox.curselection()
         if selection:
-            self.sprite_listbox.delete(selection[0])
-            # Auto-save after removing sprite
+            index = selection[0]
+            self.sprite_listbox.delete(index)
+            # Update the object's sprites array immediately from listbox
             if self.current_object:
-                self._save_current_object_changes()
+                # Set flag to prevent auto-save from reloading form
+                self._loading_object = True
+                # Update sprites array from listbox
+                sprites = []
+                for i in range(self.sprite_listbox.size()):
+                    text = self.sprite_listbox.get(i)
+                    # Parse "(x, y)" format
+                    import re
+                    match = re.match(r'\((\d+),\s*(\d+)\)', text)
+                    if match:
+                        sprites.append({"x": int(match.group(1)), "y": int(match.group(2))})
+                # Update the object's sprites array directly
+                self.current_object["sprites"] = sprites
+                # Remove legacy fields if sprites array exists
+                if sprites and len(sprites) > 0:
+                    self.current_object.pop("sprite_x", None)
+                    self.current_object.pop("sprite_y", None)
+                else:
+                    # If no sprites left, ensure we have an empty array
+                    self.current_object["sprites"] = []
+                self._loading_object = False
+                # Save config directly without calling _save_current_object_changes
+                # (which might trigger a reload)
+                self.save_config()
+                self.log_status("Sprite removed", "success")
     
     def add_object(self):
         """Add a new game object"""
@@ -1000,7 +1025,9 @@ class GameObjectEditor:
         self.current_object["properties"] = props if props else {}
         
         # Refresh the object list to show updated name (preserve selection)
-        self.refresh_object_list(preserve_selection=True)
+        # Only refresh if we're not in the middle of loading (to avoid reloading sprites)
+        if not getattr(self, '_loading_object', False):
+            self.refresh_object_list(preserve_selection=True)
         
         # Auto-save after updating object
         self.save_config()

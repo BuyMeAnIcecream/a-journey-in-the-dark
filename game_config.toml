@@ -51,12 +51,38 @@ id = "orc"
 name = "Orc"
 object_type = "character"
 walkable = false
-health = 25
+health = 40
 sprite_sheet = "monsters.png"
 monster = true
 attack = 5
 [[game_objects.sprites]]
 x = 3
+y = 0
+
+[[game_objects.sprites]]
+x = 0
+y = 0
+
+
+[[game_objects]]
+id = "week_ork"
+name = "Orc squire"
+object_type = "character"
+walkable = false
+health = 20
+attack = 5
+monster = true
+sprite_sheet = "monsters.png"
+[[game_objects.sprites]]
+x = 2
+y = 0
+
+[[game_objects.sprites]]
+x = 5
+y = 0
+
+[[game_objects.sprites]]
+x = 7
 y = 0
 
 
