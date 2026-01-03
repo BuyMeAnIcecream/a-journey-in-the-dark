@@ -56,7 +56,6 @@ async fn main() {
     // Load game configuration
     let config = match config::GameConfig::load("game_config.toml") {
         Ok(cfg) => {
-            println!("Loaded game config from game_config.toml");
             cfg
         }
         Err(e) => {
@@ -102,7 +101,6 @@ async fn main() {
             std::process::exit(1);
         }
     };
-    println!("Server running on http://localhost:3000");
     axum::serve(listener, app).await.unwrap();
 }
 
@@ -199,7 +197,6 @@ async fn handle_socket(socket: WebSocket, state: SharedState, tx: Tx) {
     // Send initial game state
     let initial_state = {
         let game = state.lock().unwrap();
-        println!("Sending game state to {}: {} entities", player_id, game.entities.len());
         // Convert entities to EntityData
         let entities: Vec<EntityData> = game.entities.iter()
             .filter(|e| e.is_alive())  // Only send alive entities
@@ -228,7 +225,6 @@ async fn handle_socket(socket: WebSocket, state: SharedState, tx: Tx) {
             })
             .collect();
         
-        println!("Sending {} entities to client", entities.len());
         // Check if current player is on stairs
         let on_stairs = game.stairs_position.map_or(false, |(sx, sy)| {
             game.entities.iter().any(|e| e.id == player_id && e.x == sx && e.y == sy)
@@ -248,20 +244,26 @@ async fn handle_socket(socket: WebSocket, state: SharedState, tx: Tx) {
     let _ = sender.send(Message::Text(initial_state)).await;
 
     // Spawn task to send updates to client
+    let player_id_for_send_cleanup = player_id.clone();
+    let state_for_send_cleanup = state.clone();
     let mut send_task = tokio::spawn(async move {
         while let Ok(msg) = rx.recv().await {
             if sender.send(Message::Text(msg)).await.is_err() {
                 break;
             }
         }
+        // Clean up player when send task ends (connection closed)
+        let mut game = state_for_send_cleanup.lock().unwrap();
+        game.remove_player(&player_id_for_send_cleanup);
     });
 
     // Spawn task to receive messages from client
     let player_id_clone = player_id.clone();
+    let state_for_recv = state.clone();
     let mut recv_task = tokio::spawn(async move {
         while let Some(Ok(Message::Text(text))) = receiver.next().await {
             if let Ok(cmd) = serde_json::from_str::<PlayerCommand>(&text) {
-                let mut game = state.lock().unwrap();
+                let mut game = state_for_recv.lock().unwrap();
                 let (combat_messages, level_complete) = game.handle_command(&cmd, &player_id_clone);
                 
                 // Broadcast update
@@ -314,9 +316,21 @@ async fn handle_socket(socket: WebSocket, state: SharedState, tx: Tx) {
         }
     });
 
+    let state_for_final_cleanup = state.clone();
+    let player_id_for_final_cleanup = player_id.clone();
     tokio::select! {
-        _ = (&mut send_task) => recv_task.abort(),
-        _ = (&mut recv_task) => send_task.abort(),
+        _ = (&mut send_task) => {
+            recv_task.abort();
+            // Also cleanup here in case recv_task cleanup didn't run
+            let mut game = state_for_final_cleanup.lock().unwrap();
+            game.remove_player(&player_id_for_final_cleanup);
+        },
+        _ = (&mut recv_task) => {
+            send_task.abort();
+            // Also cleanup here in case send_task cleanup didn't run
+            let mut game = state_for_final_cleanup.lock().unwrap();
+            game.remove_player(&player_id_for_final_cleanup);
+        },
     };
 }
 

@@ -113,17 +113,14 @@ impl GameState {
         let mut entities = Vec::new();
         
         // Don't create a default player entity - players will be added when they connect
-        println!("Game state initialized. Players will spawn when they connect.");
         
         // Spawn monsters in each room
         let monster_templates = object_registry.get_monster_characters();
-        println!("Found {} monster templates", monster_templates.len());
         if !monster_templates.is_empty() {
             use rand::Rng;
             let mut rng = rand::thread_rng();
             let mut monster_id_counter = 0;
             
-            println!("Spawning monsters in {} rooms", dungeon.rooms.len());
             for room in &dungeon.rooms {
                 // Find a random walkable position within the room
                 let mut valid_positions = Vec::new();
@@ -175,20 +172,14 @@ impl GameState {
                     );
                     entities.push(monster);
                     monster_id_counter += 1;
-                    println!("Spawned monster {} at ({}, {})", monster_template.id, monster_x, monster_y);
                 }
             }
-            println!("Total monsters spawned: {}", monster_id_counter);
         }
-        
-        println!("Total entities created: {} (player + monsters)", entities.len());
         
         // Place stairs in the room farthest from player spawn
         let stairs_pos = Self::place_stairs(&dungeon, player_x, player_y, &object_registry);
         if stairs_pos.is_some() {
-            println!("Stairs successfully placed at {:?}", stairs_pos);
         } else {
-            println!("WARNING: Failed to place stairs!");
         }
         
         Self {
@@ -210,14 +201,12 @@ impl GameState {
         // Find stairs object (should be type "goal" or "item", not "tile")
         let stairs_obj = object_registry.get_object("stairs");
         if stairs_obj.is_none() {
-            println!("No stairs object found in config. Skipping stairs placement.");
             return None;
         }
         
         // Verify it's not a tile type
         let obj = stairs_obj.unwrap();
         if obj.object_type == "tile" {
-            println!("Warning: Stairs should not be a tile type. It should be 'goal' or 'item' type.");
         }
         
         // Find the room farthest from player spawn
@@ -241,12 +230,9 @@ impl GameState {
         }
         
         if let Some(room) = farthest_room {
-            println!("Found farthest room at ({}, {}) size {}x{}", room.x, room.y, room.width, room.height);
             // Find a walkable position in the center of the farthest room
             let center_x = room.x + room.width / 2;
             let center_y = room.y + room.height / 2;
-            
-            println!("Searching for walkable tile in room center ({}, {})", center_x, center_y);
             
             // Try center first, then search nearby
             for offset in 0..=5 {  // Increased search radius
@@ -259,16 +245,13 @@ impl GameState {
                             if dungeon.tiles[y][x].walkable {
                                 // Don't replace the tile - just return the position
                                 // The stairs will be rendered as an entity/object on top
-                                println!("Placed stairs at ({}, {}) in farthest room", x, y);
                                 return Some((x, y));
                             }
                         }
                     }
                 }
             }
-            println!("Warning: Could not find walkable tile in farthest room!");
         } else {
-            println!("Warning: No rooms found in dungeon!");
         }
         
         None
@@ -340,7 +323,6 @@ impl GameState {
                             // Player stepped on stairs - they need to confirm
                             // This will be handled by the client showing a confirmation dialog
                             // For now, we just note that the player is on stairs
-                            println!("Player {} stepped on stairs at ({}, {})", player_id, stairs_x, stairs_y);
                         }
                     }
                 }
@@ -368,7 +350,6 @@ impl GameState {
         let all_confirmed = all_players.iter().all(|pid| self.player_confirmations.contains(pid));
         
         if all_confirmed {
-            println!("All players confirmed. Level complete!");
             return true;
         }
         
@@ -455,7 +436,6 @@ impl GameState {
             self.entities.push(player);
             Some(idx)
         } else {
-            println!("WARNING: No player object found in registry!");
             None
         }
     }
@@ -464,7 +444,6 @@ impl GameState {
         // Remove player entity (or mark as dead)
         if let Some(idx) = self.entities.iter().position(|e| e.id == player_id && e.controller == EntityController::Player) {
             self.entities[idx].current_health = 0; // Mark as dead
-            println!("Removed player entity: {}", player_id);
         }
     }
     

@@ -28,6 +28,9 @@
             background: #000;
             image-rendering: pixelated;
             image-rendering: crisp-edges;
+            display: block;
+            width: 320px;
+            height: 320px;
         }
         
         #status {
@@ -83,6 +86,7 @@
     <div id="controls">Use Arrow Keys or WASD to move</div>
     <div id="console"></div>
     
+    <script src="game.js"></script>
     <script>
         const canvas = document.getElementById('gameContainer');
         const ctx = canvas.getContext('2d', { alpha: true }); // Enable alpha channel for transparency
@@ -106,17 +110,14 @@
                 
                 const img = new Image();
                 img.onload = () => {
-                    console.log(`Sprite sheet "${name}" loaded successfully:`, img.width, 'x', img.height);
                     spriteSheets[name] = img;
                     resolve(img);
                 };
                 img.onerror = (e) => {
                     console.error(`Failed to load sprite sheet "${name}":`, e);
-                    console.log('Tried to load:', img.src);
                     reject(e);
                 };
                 img.src = `/assets/${name}`;
-                console.log(`Loading sprite sheet from:`, img.src);
             });
         }
         
@@ -149,7 +150,12 @@
             ws = new WebSocket(wsUrl);
             
             ws.onopen = () => {
-                statusDiv.textContent = 'Connected';
+                statusDiv.textContent = 'Connected - Waiting for game state...';
+            };
+            
+            ws.onerror = (error) => {
+                console.error('WebSocket error:', error);
+                statusDiv.textContent = 'Connection error - Check console';
             };
             
             const consoleDiv = document.getElementById('console');
@@ -167,23 +173,8 @@
             }
             
             ws.onmessage = async (event) => {
-                gameState = JSON.parse(event.data);
-                console.log('Game state received:', {
-                    width: gameState.width,
-                    height: gameState.height,
-                    mapSize: gameState.map ? `${gameState.map.length}x${gameState.map[0]?.length}` : 'null',
-                    entities: gameState.entities ? gameState.entities.length : 0,
-                    firstTile: gameState.map?.[0]?.[0],
-                    on_stairs: gameState.on_stairs,
-                    level_complete: gameState.level_complete,
-                    stairs_position: gameState.stairs_position
-                });
-                
-                if (gameState.stairs_position) {
-                    console.log('Stairs position:', gameState.stairs_position);
-                } else {
-                    console.log('WARNING: No stairs position in game state!');
-                }
+                try {
+                    gameState = JSON.parse(event.data);
                 
                 // Check if level is complete
                 if (gameState.level_complete) {
@@ -223,29 +214,39 @@
                     });
                 }
                 
+                // Ensure default sprite sheet is loaded first
+                if (!spriteSheetLoaded) {
+                    try {
+                        await loadSpriteSheet(DEFAULT_SPRITE_SHEET);
+                        spriteSheetLoaded = true;
+                    } catch (e) {
+                        console.error('Failed to load default sprite sheet:', e);
+                        spriteSheetLoaded = true; // Still allow rendering with fallback
+                    }
+                }
+                
                 // Load sprite sheets for all entities (wait for all to load)
                 if (gameState.entities) {
                     const spriteSheetPromises = [];
                     for (const entity of gameState.entities) {
                         if (entity.sprite_sheet) {
-                            console.log(`Loading sprite sheet for entity ${entity.id}: ${entity.sprite_sheet}`);
                             spriteSheetPromises.push(
                                 loadSpriteSheet(entity.sprite_sheet)
-                                    .then(() => console.log(`Successfully loaded sprite sheet: ${entity.sprite_sheet}`))
                                     .catch((e) => console.error(`Could not load sprite sheet "${entity.sprite_sheet}":`, e))
                             );
                         }
                     }
                     // Wait for all sprite sheets to load before rendering
                     await Promise.all(spriteSheetPromises);
-                    console.log('All sprite sheets loaded, rendering...');
                 }
                 
+                statusDiv.textContent = 'Connected - Rendering...';
                 render();
-            };
-            
-            ws.onerror = () => {
-                statusDiv.textContent = 'Connection error';
+                } catch (error) {
+                    console.error('Error parsing game state:', error);
+                    console.error('Raw data (first 500 chars):', event.data.substring(0, 500));
+                    statusDiv.textContent = 'Error parsing game state - Check console';
+                }
             };
             
             ws.onclose = () => {
@@ -256,31 +257,121 @@
         
         // Render the game
         function render() {
-            if (!gameState || !spriteSheetLoaded) return;
+            if (!gameState) {
+                // Draw a simple test pattern even without gameState
+                canvas.width = 320;
+                canvas.height = 320;
+                ctx.fillStyle = '#000000';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                ctx.fillStyle = '#ff0000';
+                ctx.fillRect(50, 50, 100, 100);
+                ctx.fillStyle = '#ffffff';
+                ctx.font = '20px Arial';
+                ctx.fillText('No gameState', 50, 150);
+                return;
+            }
             
-            canvas.width = gameState.width * TILE_SIZE;
-            canvas.height = gameState.height * TILE_SIZE;
+            // Allow rendering even if sprite sheet isn't loaded (will use fallback)
+            if (!spriteSheetLoaded) {
+                // Don't return - continue with fallback rendering
+            }
+            
+            // Find player position for camera (find the first alive player)
+            let playerX = 0;
+            let playerY = 0;
+            let playerFound = false;
+            
+            if (gameState.entities) {
+                for (const entity of gameState.entities) {
+                    if (entity.controller === 'Player' && entity.current_health > 0) {
+                        playerX = entity.x;
+                        playerY = entity.y;
+                        playerFound = true;
+                        break;
+                    }
+                }
+            }
+            
+            // If no player found, center on map origin
+            if (!playerFound) {
+                playerX = 0;
+                playerY = 0;
+            }
+            
+            // Camera viewport: 10x10 tiles centered on player
+            const VIEWPORT_SIZE = 10;
+            const HALF_VIEWPORT = Math.floor(VIEWPORT_SIZE / 2);
+            
+            // Calculate ideal viewport (before clamping)
+            const idealViewportMinX = playerX - HALF_VIEWPORT;
+            const idealViewportMinY = playerY - HALF_VIEWPORT;
+            
+            // Calculate viewport bounds (centered on player)
+            let viewportMinX = playerX - HALF_VIEWPORT;
+            let viewportMaxX = playerX + HALF_VIEWPORT;
+            let viewportMinY = playerY - HALF_VIEWPORT;
+            let viewportMaxY = playerY + HALF_VIEWPORT;
+            
+            // Clamp viewport to map boundaries
+            viewportMinX = Math.max(0, viewportMinX);
+            viewportMaxX = Math.min(gameState.width - 1, viewportMaxX);
+            viewportMinY = Math.max(0, viewportMinY);
+            viewportMaxY = Math.min(gameState.height - 1, viewportMaxY);
+            
+            // Calculate offset to center the viewport on canvas
+            // This accounts for when the viewport is clamped to map boundaries
+            const offsetX = (viewportMinX - idealViewportMinX) * TILE_SIZE;
+            const offsetY = (viewportMinY - idealViewportMinY) * TILE_SIZE;
+            
+            // Canvas size is always 10x10 tiles
+            canvas.width = VIEWPORT_SIZE * TILE_SIZE;
+            canvas.height = VIEWPORT_SIZE * TILE_SIZE;
             
             // Clear canvas with transparent background to ensure proper transparency
             ctx.clearRect(0, 0, canvas.width, canvas.height);
             
-            // Draw map tiles first (so entities render on top)
-            for (let y = 0; y < gameState.height; y++) {
-                for (let x = 0; x < gameState.width; x++) {
+            // Fill with black background for visibility
+            ctx.fillStyle = '#000000';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            // Draw map tiles within viewport
+            for (let y = viewportMinY; y <= viewportMaxY; y++) {
+                for (let x = viewportMinX; x <= viewportMaxX; x++) {
+                    // Safety check for map bounds
+                    if (!gameState.map || !gameState.map[y] || gameState.map[y][x] === undefined) {
+                        // Draw fallback tile
+                        const viewportX = x - viewportMinX;
+                        const viewportY = y - viewportMinY;
+                        const destX = viewportX * TILE_SIZE + offsetX;
+                        const destY = viewportY * TILE_SIZE + offsetY;
+                        ctx.fillStyle = '#222222';
+                        ctx.fillRect(destX, destY, TILE_SIZE, TILE_SIZE);
+                        continue;
+                    }
+                    
                     const tile = gameState.map[y][x];
                     
+                    // Calculate position relative to viewport, with offset to center on canvas
+                    const viewportX = x - viewportMinX;
+                    const viewportY = y - viewportMinY;
+                    const destX = viewportX * TILE_SIZE + offsetX;
+                    const destY = viewportY * TILE_SIZE + offsetY;
+                    
+                    // Safety check for canvas bounds
+                    if (destX < 0 || destX >= canvas.width || destY < 0 || destY >= canvas.height) {
+                        continue;
+                    }
+                    
                     if (!tile) {
-                        // Fallback: draw black tile if tile is missing
-                        ctx.fillStyle = '#000000';
-                        ctx.fillRect(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
+                        // Fallback: draw dark gray tile if tile is missing
+                        ctx.fillStyle = '#222222';
+                        ctx.fillRect(destX, destY, TILE_SIZE, TILE_SIZE);
                         continue;
                     }
                     
                     // Draw sprite from sprite sheet
                     const srcX = (tile.sprite_x || 0) * SPRITE_SHEET_TILE_SIZE;
                     const srcY = (tile.sprite_y || 0) * SPRITE_SHEET_TILE_SIZE;
-                    const destX = x * TILE_SIZE;
-                    const destY = y * TILE_SIZE;
                     
                     // Check if sprite sheet is loaded (tiles use default sprite sheet)
                     const tileSpriteSheet = getSpriteSheet(DEFAULT_SPRITE_SHEET);
@@ -294,18 +385,31 @@
                             destX, destY, TILE_SIZE, TILE_SIZE
                         );
                     } else {
-                        // Fallback: draw colored rectangle based on walkable
-                        ctx.fillStyle = tile.walkable ? '#333333' : '#111111';
+                        // Fallback: draw colored rectangle based on walkable (more visible)
+                        ctx.fillStyle = tile.walkable ? '#555555' : '#222222';
                         ctx.fillRect(destX, destY, TILE_SIZE, TILE_SIZE);
+                        // Add a border to make tiles more visible
+                        ctx.strokeStyle = tile.walkable ? '#777777' : '#444444';
+                        ctx.lineWidth = 1;
+                        ctx.strokeRect(destX, destY, TILE_SIZE, TILE_SIZE);
                     }
                 }
             }
             
-            // Draw all entities (player + AI) on top of tiles
+            // Draw all entities (player + AI) on top of tiles, but only if within viewport
             if (gameState.entities) {
                 for (const entity of gameState.entities) {
-                    const destX = entity.x * TILE_SIZE;
-                    const destY = entity.y * TILE_SIZE;
+                    // Check if entity is within viewport
+                    if (entity.x < viewportMinX || entity.x > viewportMaxX ||
+                        entity.y < viewportMinY || entity.y > viewportMaxY) {
+                        continue; // Skip entities outside viewport
+                    }
+                    
+                    // Calculate position relative to viewport, with offset to center on canvas
+                    const viewportX = entity.x - viewportMinX;
+                    const viewportY = entity.y - viewportMinY;
+                    const destX = viewportX * TILE_SIZE + offsetX;
+                    const destY = viewportY * TILE_SIZE + offsetY;
                     
                     // Get sprite sheet for this entity
                     const entitySpriteSheetName = entity.sprite_sheet || DEFAULT_SPRITE_SHEET;
@@ -367,53 +471,60 @@
                 }
             }
             
-            // Draw stairs (goal object) on top of tiles and entities
+            // Draw stairs (goal object) on top of tiles and entities, but only if within viewport
             if (gameState.stairs_position && Array.isArray(gameState.stairs_position) && gameState.stairs_position.length === 2) {
                 const stairsX = gameState.stairs_position[0];
                 const stairsY = gameState.stairs_position[1];
-                const destX = stairsX * TILE_SIZE;
-                const destY = stairsY * TILE_SIZE;
                 
-                console.log(`Rendering stairs at (${stairsX}, ${stairsY}) -> canvas (${destX}, ${destY})`);
-                
-                // Get stairs sprite from config (we'll need to load it from the stairs object)
-                // For now, use a default sprite sheet and coordinates
-                const stairsSpriteSheet = getSpriteSheet('tiles.png');
-                if (stairsSpriteSheet && stairsSpriteSheet.complete) {
-                    // Stairs sprite coordinates from config (x=7, y=16)
-                    const stairsSpriteX = 7 * SPRITE_SHEET_TILE_SIZE;
-                    const stairsSpriteY = 16 * SPRITE_SHEET_TILE_SIZE;
+                // Check if stairs are within viewport
+                if (stairsX >= viewportMinX && stairsX <= viewportMaxX &&
+                    stairsY >= viewportMinY && stairsY <= viewportMaxY) {
                     
-                    ctx.globalCompositeOperation = 'source-over';
-                    ctx.imageSmoothingEnabled = false;
-                    ctx.drawImage(
-                        stairsSpriteSheet,
-                        stairsSpriteX, stairsSpriteY, SPRITE_SHEET_TILE_SIZE, SPRITE_SHEET_TILE_SIZE,
-                        destX, destY, TILE_SIZE, TILE_SIZE
-                    );
+                    // Calculate position relative to viewport, with offset to center on canvas
+                    const viewportX = stairsX - viewportMinX;
+                    const viewportY = stairsY - viewportMinY;
+                    const destX = viewportX * TILE_SIZE + offsetX;
+                    const destY = viewportY * TILE_SIZE + offsetY;
                     
-                    // Also draw a bright border to make stairs more visible for debugging
-                    ctx.strokeStyle = '#00ffff';
-                    ctx.lineWidth = 3;
-                    ctx.strokeRect(destX, destY, TILE_SIZE, TILE_SIZE);
-                } else {
-                    // Fallback: draw a bright yellow rectangle for stairs (very visible)
-                    ctx.fillStyle = '#ffff00';
-                    ctx.fillRect(destX, destY, TILE_SIZE, TILE_SIZE);
-                    ctx.strokeStyle = '#ff0000';
-                    ctx.lineWidth = 3;
-                    ctx.strokeRect(destX, destY, TILE_SIZE, TILE_SIZE);
-                    // Draw "S" text on it
-                    ctx.fillStyle = '#000000';
-                    ctx.font = 'bold 24px Arial';
-                    ctx.textAlign = 'center';
-                    ctx.textBaseline = 'middle';
-                    ctx.fillText('S', destX + TILE_SIZE / 2, destY + TILE_SIZE / 2);
+                    // Get stairs sprite from config (we'll need to load it from the stairs object)
+                    // For now, use a default sprite sheet and coordinates
+                    const stairsSpriteSheet = getSpriteSheet('tiles.png');
+                    if (stairsSpriteSheet && stairsSpriteSheet.complete) {
+                        // Stairs sprite coordinates from config (x=7, y=16)
+                        const stairsSpriteX = 7 * SPRITE_SHEET_TILE_SIZE;
+                        const stairsSpriteY = 16 * SPRITE_SHEET_TILE_SIZE;
+                        
+                        ctx.globalCompositeOperation = 'source-over';
+                        ctx.imageSmoothingEnabled = false;
+                        ctx.drawImage(
+                            stairsSpriteSheet,
+                            stairsSpriteX, stairsSpriteY, SPRITE_SHEET_TILE_SIZE, SPRITE_SHEET_TILE_SIZE,
+                            destX, destY, TILE_SIZE, TILE_SIZE
+                        );
+                        
+                        // Also draw a bright border to make stairs more visible for debugging
+                        ctx.strokeStyle = '#00ffff';
+                        ctx.lineWidth = 3;
+                        ctx.strokeRect(destX, destY, TILE_SIZE, TILE_SIZE);
+                    } else {
+                        // Fallback: draw a bright yellow rectangle for stairs (very visible)
+                        ctx.fillStyle = '#ffff00';
+                        ctx.fillRect(destX, destY, TILE_SIZE, TILE_SIZE);
+                        ctx.strokeStyle = '#ff0000';
+                        ctx.lineWidth = 3;
+                        ctx.strokeRect(destX, destY, TILE_SIZE, TILE_SIZE);
+                        // Draw "S" text on it
+                        ctx.fillStyle = '#000000';
+                        ctx.font = 'bold 24px Arial';
+                        ctx.textAlign = 'center';
+                        ctx.textBaseline = 'middle';
+                        ctx.fillText('S', destX + TILE_SIZE / 2, destY + TILE_SIZE / 2);
+                    }
                 }
-            } else {
-                if (gameState.stairs_position) {
-                    console.log('WARNING: stairs_position is not in expected format:', gameState.stairs_position);
-                }
+            }
+            
+            if (gameState.stairs_position && !Array.isArray(gameState.stairs_position)) {
+                console.warn('stairs_position is not in expected format:', gameState.stairs_position);
             }
         }
         
@@ -444,6 +555,8 @@
         document.addEventListener('keyup', (e) => {
             keysPressed.delete(e.key);
         });
+        
+        // Test canvas function removed - game rendering handles canvas now
         
         // Load default sprite sheet and start connection
         loadDefaultSpriteSheet();
