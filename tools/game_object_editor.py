@@ -157,9 +157,7 @@ class GameObjectEditor:
         self.custom_props_text.grid(row=sprite_row+4, column=0, columnspan=2, 
                                     sticky=(tk.W, tk.E), pady=5)
         
-        # Save button
-        ttk.Button(middle_panel, text="Save Changes", command=self.save_object).grid(
-            row=sprite_row+5, column=0, columnspan=2, pady=(20, 0))
+        # Note: Save is now handled by the main "Save" button at the bottom
         
         # Store last clicked coordinates for adding sprites
         self.last_clicked_sprite = None
@@ -224,7 +222,7 @@ class GameObjectEditor:
         # Bottom - Action buttons
         button_frame = ttk.Frame(main_frame)
         button_frame.grid(row=1, column=0, columnspan=3, pady=(10, 0))
-        ttk.Button(button_frame, text="Save Config File", command=self.save_config).pack(side=tk.LEFT, padx=5)
+        ttk.Button(button_frame, text="Save", command=self.save_all).pack(side=tk.LEFT, padx=5)
         ttk.Button(button_frame, text="Restart Server", command=self.restart_server).pack(side=tk.LEFT, padx=5)
         self.server_status_label = ttk.Label(button_frame, text="Server: Unknown", foreground="gray")
         self.server_status_label.pack(side=tk.LEFT, padx=10)
@@ -554,66 +552,6 @@ class GameObjectEditor:
         self.custom_props_text.delete(1.0, tk.END)
         self.custom_props_text.insert(1.0, props_text)
     
-    def save_object(self):
-        """Save current object changes"""
-        if not self.current_object:
-            messagebox.showwarning("No Selection", "Please select an object to edit")
-            return
-        
-        try:
-            # Update properties
-            for key, (var, dtype) in self.prop_vars.items():
-                if key == "health":
-                    val = var.get()
-                    self.current_object["health"] = int(val) if val.strip() else None
-                elif key == "sprite_sheet":
-                    val = var.get().strip()
-                    if val:
-                        self.current_object["sprite_sheet"] = val
-                        # Switch to this sprite sheet if it's different
-                        if val != self.current_sprite_sheet and val in self.sprite_sheet_combo['values']:
-                            self.sprite_sheet_var.set(val)
-                            self.on_sprite_sheet_change()
-                    else:
-                        self.current_object.pop("sprite_sheet", None)  # Remove if empty
-                elif dtype == bool:
-                    self.current_object[key] = var.get()
-                elif dtype == int:
-                    self.current_object[key] = int(var.get() or "0")
-                else:
-                    self.current_object[key] = var.get()
-            
-            # Update sprite array from listbox
-            sprites = []
-            for i in range(self.sprite_listbox.size()):
-                text = self.sprite_listbox.get(i)
-                # Parse "(x, y)" format
-                import re
-                match = re.match(r'\((\d+),\s*(\d+)\)', text)
-                if match:
-                    sprites.append({"x": int(match.group(1)), "y": int(match.group(2))})
-            self.current_object["sprites"] = sprites
-            
-            # Remove legacy fields if sprites array exists
-            if sprites:
-                self.current_object.pop("sprite_x", None)
-                self.current_object.pop("sprite_y", None)
-            
-            # Update custom properties
-            props_text = self.custom_props_text.get(1.0, tk.END).strip()
-            props = {}
-            if props_text:
-                for line in props_text.split("\n"):
-                    line = line.strip()
-                    if line and "=" in line:
-                        k, v = line.split("=", 1)
-                        props[k.strip()] = v.strip()
-            self.current_object["properties"] = props if props else {}
-            
-            messagebox.showinfo("Success", "Object saved successfully!")
-            self.refresh_object_list()
-        except Exception as e:
-            messagebox.showerror("Error", f"Failed to save object: {e}")
     
     def add_sprite_from_click(self):
         """Add sprite from last click or prompt for coordinates"""
@@ -813,6 +751,80 @@ class GameObjectEditor:
         # Show feedback
         if response is not None:
             print(f"✓ {'Added' if response else 'Set'} sprite coordinates ({tile_x}, {tile_y}) for '{self.current_object.get('name', 'object')}'")
+    
+    def save_all(self):
+        """Save current object changes and then save config to file"""
+        # First, save current object changes if an object is selected
+        if self.current_object:
+            try:
+                self._save_current_object_changes()
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to save object changes: {e}")
+                return
+        
+        # Then save the config file
+        self.save_config()
+    
+    def _save_current_object_changes(self):
+        """Save current object changes to memory (internal method)"""
+        if not self.current_object:
+            return
+        
+        # Update properties
+        for key, (var, dtype) in self.prop_vars.items():
+            if key == "health":
+                val = var.get()
+                self.current_object["health"] = int(val) if val.strip() else None
+            elif key == "sprite_sheet":
+                val = var.get().strip()
+                if val:
+                    self.current_object["sprite_sheet"] = val
+                    # Switch to this sprite sheet if it's different
+                    if val != self.current_sprite_sheet and val in self.sprite_sheet_combo['values']:
+                        self.sprite_sheet_var.set(val)
+                        self.on_sprite_sheet_change()
+                else:
+                    self.current_object.pop("sprite_sheet", None)  # Remove if empty
+            elif dtype == bool:
+                self.current_object[key] = var.get()
+            elif dtype == int:
+                self.current_object[key] = int(var.get() or "0")
+            else:
+                self.current_object[key] = var.get()
+        
+        # Update sprite array from listbox
+        sprites = []
+        for i in range(self.sprite_listbox.size()):
+            text = self.sprite_listbox.get(i)
+            # Parse "(x, y)" format
+            import re
+            match = re.match(r'\((\d+),\s*(\d+)\)', text)
+            if match:
+                sprites.append({"x": int(match.group(1)), "y": int(match.group(2))})
+        self.current_object["sprites"] = sprites
+        
+        # Remove legacy fields if sprites array exists
+        if sprites:
+            self.current_object.pop("sprite_x", None)
+            self.current_object.pop("sprite_y", None)
+        
+        # Update custom properties
+        props_text = self.custom_props_text.get(1.0, tk.END).strip()
+        props = {}
+        if props_text:
+            for line in props_text.split("\n"):
+                line = line.strip()
+                if line and "=" in line:
+                    k, v = line.split("=", 1)
+                    props[k.strip()] = v.strip()
+        self.current_object["properties"] = props if props else {}
+        
+        # Refresh the object list to show updated name
+        self.refresh_object_list()
+    
+    def save_object(self):
+        """Save current object changes (kept for backward compatibility, now calls save_all)"""
+        self.save_all()
     
     def save_config(self):
         """Save config to file with proper formatting"""

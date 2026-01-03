@@ -1,11 +1,27 @@
 #!/bin/bash
-# Get the directory where this script is located
-SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
-PROJECT_ROOT="$( cd "$SCRIPT_DIR/../../.." && pwd )"
+# Get the directory where this app bundle is located
+APP_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )/../.." && pwd )"
+PROJECT_ROOT="$( dirname "$APP_DIR" )"
+TOOLS_DIR="$PROJECT_ROOT/tools"
 
-# Change to the tools directory
-cd "$PROJECT_ROOT/tools"
+# Find python3
+PYTHON3="/Library/Frameworks/Python.framework/Versions/3.13/bin/python3"
+if [ ! -f "$PYTHON3" ]; then
+    PYTHON3=$(which python3)
+fi
 
-# Run the Python editor
-python3 game_object_editor.py
+if [ -z "$PYTHON3" ] || [ ! -f "$PYTHON3" ]; then
+    osascript <<EOF
+display dialog "Python 3 not found. Please install Python 3." buttons {"OK"} default button "OK" with icon stop
+EOF
+    exit 1
+fi
 
+# Change to tools directory and run
+cd "$TOOLS_DIR" || exit 1
+
+# Run with proper environment
+export PATH="/usr/local/bin:/opt/homebrew/bin:/Library/Frameworks/Python.framework/Versions/3.13/bin:$PATH"
+
+# Launch the Python GUI application
+"$PYTHON3" game_object_editor.py

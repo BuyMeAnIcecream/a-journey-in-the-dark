@@ -137,11 +137,15 @@
                 
                 // Load player's sprite sheet if specified and not already loaded
                 if (gameState.player_sprite_sheet) {
+                    console.log(`Loading player sprite sheet: ${gameState.player_sprite_sheet}`);
                     try {
                         await loadSpriteSheet(gameState.player_sprite_sheet);
+                        console.log(`Successfully loaded sprite sheet: ${gameState.player_sprite_sheet}`);
                     } catch (e) {
-                        console.warn(`Could not load player sprite sheet "${gameState.player_sprite_sheet}"`);
+                        console.error(`Could not load player sprite sheet "${gameState.player_sprite_sheet}":`, e);
                     }
+                } else {
+                    console.warn('Player sprite_sheet not specified, using default');
                 }
                 
                 render();
@@ -215,6 +219,13 @@
             // Always draw player - use sprite if available, otherwise fallback
             const playerSpriteSheetName = gameState.player_sprite_sheet || DEFAULT_SPRITE_SHEET;
             const playerSpriteSheet = getSpriteSheet(playerSpriteSheetName);
+            
+            // Debug logging
+            if (!playerSpriteSheet) {
+                console.warn(`Player sprite sheet "${playerSpriteSheetName}" not loaded yet`);
+            } else if (!playerSpriteSheet.complete) {
+                console.warn(`Player sprite sheet "${playerSpriteSheetName}" not complete yet`);
+            }
             
             if (playerSpriteX !== undefined && playerSpriteY !== undefined && 
                 playerSpriteSheet && playerSpriteSheet.complete) {
