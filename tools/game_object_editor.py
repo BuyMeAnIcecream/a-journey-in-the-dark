@@ -15,6 +15,8 @@ import signal
 import platform
 import random
 import math
+import urllib.request
+import urllib.error
 
 class GameObjectEditor:
     def __init__(self, root):
@@ -38,6 +40,10 @@ class GameObjectEditor:
         self.zoom_level = 1.0  # Current zoom level (1.0 = 100%)
         self.tile_size = 32  # Size of each tile in pixels
         self.server_process = None  # Reference to running server process
+        self.schema = None  # Dynamic schema loaded from server
+        
+        # Load schema first (needed for UI creation)
+        self.load_schema()
         
         # Create UI
         self.create_ui()
@@ -145,20 +151,34 @@ class GameObjectEditor:
         middle_panel = ttk.LabelFrame(self.objects_tab, text="Properties", padding="10")
         middle_panel.grid(row=0, column=1, sticky=(tk.W, tk.E, tk.N, tk.S), padx=(0, 10))
         
-        # Define property schema: which properties each object type should show
-        # Properties are: (label, key, dtype, always_show, show_for_types)
-        self.property_schema = {
-            "id": ("ID:", "id", str, True, []),  # Always show
-            "name": ("Name:", "name", str, True, []),  # Always show
-            "object_type": ("Type:", "object_type", str, True, []),  # Always show
-            "walkable": ("Walkable:", "walkable", bool, False, ["tile"]),  # Only for tiles
-            "health": ("Health:", "health", int, False, ["character", "item"]),  # For entities
-            "attack": ("Attack:", "attack", int, False, ["character", "item"]),  # For entities
-            "defense": ("Defense:", "defense", int, False, ["character", "item"]),  # For entities
-            "monster": ("Monster:", "monster", bool, False, ["character"]),  # Only for characters
-            "healing_power": ("Healing Power:", "healing_power", int, False, ["consumable"]),  # Only for consumables
-            "sprite_sheet": ("Sprite Sheet:", "sprite_sheet", str, True, []),  # Always show
-        }
+        # Build property schema dynamically from loaded schema
+        # Filter out hidden fields (label=None) and build schema dict
+        self.property_schema = {}
+        if self.schema and "fields" in self.schema:
+            for field in self.schema["fields"]:
+                if field.get("label") is None:  # Skip hidden fields
+                    continue
+                
+                field_name = field["name"]
+                field_type = field["field_type"]
+                show_for_types = field.get("show_for_types", [])
+                label = field.get("label", field_name.capitalize())
+                
+                # Map Rust types to Python types
+                if field_type == "bool" or field_type == "Option<bool>":
+                    dtype = bool
+                elif "i32" in field_type or "u32" in field_type:
+                    dtype = int
+                else:
+                    dtype = str
+                
+                # Determine if always show (empty show_for_types means show for all)
+                always_show = len(show_for_types) == 0
+                
+                self.property_schema[field_name] = (f"{label}:", field_name, dtype, always_show, show_for_types)
+        else:
+            # Fallback to empty schema if schema not loaded
+            self.property_schema = {}
         
         # Properties form
         self.prop_vars = {}
@@ -247,15 +267,7 @@ class GameObjectEditor:
         ttk.Button(sprite_btn_frame, text="Add from Click", command=self.add_sprite_from_click, width=15).pack(side=tk.LEFT, padx=(0, 5))
         ttk.Button(sprite_btn_frame, text="Remove Selected", command=self.remove_sprite, width=15).pack(side=tk.LEFT)
         
-        # Custom properties
-        ttk.Label(middle_panel, text="Custom Properties:", font=("Arial", 10, "bold")).grid(
-            row=sprite_row+3, column=0, columnspan=2, sticky=tk.W, pady=(20, 5))
-        
-        self.custom_props_text = tk.Text(middle_panel, width=30, height=5)
-        self.custom_props_text.grid(row=sprite_row+4, column=0, columnspan=2, 
-                                    sticky=(tk.W, tk.E), pady=5)
-        # Add auto-save on custom properties change
-        self.custom_props_text.bind("<KeyRelease>", lambda e: self._on_property_change("properties"))
+        # Custom properties removed - all properties are now defined in schema
         
         # Note: Save is now handled by the main "Save" button at the bottom
         
@@ -513,6 +525,59 @@ class GameObjectEditor:
         except Exception as e:
             self.log_status(f"Failed to load config: {e}", "error")
             self.config = {"game_objects": []}
+    
+    def load_schema(self):
+        """Load GameObject schema from server endpoint or use defaults"""
+        schema_path = self.project_root / "game_object_schema.json"
+        
+        # Try to load from local file first
+        if schema_path.exists():
+            try:
+                with open(schema_path, 'r') as f:
+                    self.schema = json.load(f)
+                if not hasattr(self, 'status_label') or not self.status_label:
+                    print("Loaded schema from local file")
+                else:
+                    self.log_status("Loaded schema from local file", "success")
+                return
+            except Exception as e:
+                if hasattr(self, 'status_label') and self.status_label:
+                    self.log_status(f"Failed to load schema from file: {e}", "warning")
+        
+        # Try to fetch from server
+        try:
+            url = "http://localhost:3000/api/schema"
+            with urllib.request.urlopen(url, timeout=2) as response:
+                self.schema = json.loads(response.read().decode())
+                # Save to local file for offline use
+                with open(schema_path, 'w') as f:
+                    json.dump(self.schema, f, indent=2)
+                if hasattr(self, 'status_label') and self.status_label:
+                    self.log_status("Loaded schema from server", "success")
+                return
+        except (urllib.error.URLError, urllib.error.HTTPError, OSError) as e:
+            # Server not running or endpoint not available - use hardcoded fallback
+            if hasattr(self, 'status_label') and self.status_label:
+                self.log_status("Server not available, using default schema", "warning")
+            self.schema = self._get_default_schema()
+    
+    def _get_default_schema(self):
+        """Fallback schema if server is not available"""
+        return {
+            "fields": [
+                {"name": "id", "field_type": "String", "optional": False, "default": None, "show_for_types": [], "label": "ID"},
+                {"name": "name", "field_type": "String", "optional": False, "default": None, "show_for_types": [], "label": "Name"},
+                {"name": "object_type", "field_type": "String", "optional": False, "default": None, "show_for_types": [], "label": "Type"},
+                {"name": "walkable", "field_type": "bool", "optional": False, "default": "false", "show_for_types": ["tile"], "label": "Walkable"},
+                {"name": "health", "field_type": "Option<u32>", "optional": True, "default": None, "show_for_types": ["character", "item"], "label": "Health"},
+                {"name": "attack", "field_type": "Option<i32>", "optional": True, "default": None, "show_for_types": ["character", "item"], "label": "Attack"},
+                {"name": "defense", "field_type": "Option<i32>", "optional": True, "default": None, "show_for_types": ["character", "item"], "label": "Defense"},
+                {"name": "monster", "field_type": "Option<bool>", "optional": True, "default": "false", "show_for_types": ["character"], "label": "Monster"},
+                {"name": "healing_power", "field_type": "Option<u32>", "optional": True, "default": None, "show_for_types": ["consumable"], "label": "Healing Power"},
+                {"name": "sprites", "field_type": "Vec<SpriteCoord>", "optional": False, "default": "[]", "show_for_types": [], "label": "Sprites"},
+                {"name": "sprite_sheet", "field_type": "Option<String>", "optional": True, "default": None, "show_for_types": [], "label": "Sprite Sheet"},
+            ]
+        }
     
     def get_required_schema(self):
         """Define the required schema for GameObject based on current Rust struct
@@ -1046,11 +1111,7 @@ class GameObjectEditor:
             y = sprite.get("y", 0) if isinstance(sprite, dict) else sprite.y if hasattr(sprite, 'y') else 0
             self.sprite_listbox.insert(tk.END, f"({x}, {y})")
         
-        # Load custom properties
-        props = obj.get("properties", {})
-        props_text = "\n".join(f"{k}={v}" for k, v in props.items())
-        self.custom_props_text.delete(1.0, tk.END)
-        self.custom_props_text.insert(1.0, props_text)
+        # Custom properties removed - all properties are now in schema
         
         # Clear loading flag - done loading object into form
         self._loading_object = False
@@ -1180,7 +1241,7 @@ class GameObjectEditor:
                         var.set(False)
                     else:
                         var.set("")
-                self.custom_props_text.delete(1.0, tk.END)
+                # Custom properties removed
                 self.sprite_listbox.delete(0, tk.END)
                 # Automatically save to clean up the file
                 self.save_config(show_message=True)
@@ -1380,16 +1441,10 @@ class GameObjectEditor:
         # Preserve sprite_sheet if it exists - don't remove it
         # It will be updated by the form field if changed, but won't be removed
         
-        # Update custom properties
-        props_text = self.custom_props_text.get(1.0, tk.END).strip()
-        props = {}
-        if props_text:
-            for line in props_text.split("\n"):
-                line = line.strip()
-                if line and "=" in line:
-                    k, v = line.split("=", 1)
-                    props[k.strip()] = v.strip()
-        self.current_object["properties"] = props if props else {}
+        # Custom properties removed - all properties are now handled through schema fields
+        # Ensure properties map exists for backward compatibility but keep it empty
+        if "properties" not in self.current_object:
+            self.current_object["properties"] = {}
         
         # Refresh the object list to show updated name (preserve selection)
         # Only refresh if we're not in the middle of loading (to avoid reloading sprites)

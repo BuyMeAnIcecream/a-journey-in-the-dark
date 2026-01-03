@@ -15,6 +15,7 @@ mod dungeon;
 mod game;
 mod game_object;
 mod game_object_registry;
+mod schema;
 mod tile;
 mod tile_registry;
 
@@ -100,6 +101,7 @@ async fn main() {
         .route("/", get(index))
         .route("/ws", get(websocket_handler))
         .route("/api/map", get(generate_map_endpoint))
+        .route("/api/schema", get(schema_endpoint))
         .nest_service("/assets", ServeDir::new("assets"))
         .nest_service("/client", ServeDir::new("client"))
         .with_state((state, tx));
@@ -122,6 +124,10 @@ async fn main() {
 
 async fn index() -> Html<&'static str> {
     Html(include_str!("../client/index.html"))
+}
+
+async fn schema_endpoint() -> Json<schema::GameObjectSchema> {
+    Json(schema::GameObjectSchema::generate())
 }
 
 async fn generate_map_endpoint() -> Json<GameUpdate> {
