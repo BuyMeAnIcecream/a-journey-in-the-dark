@@ -14,6 +14,12 @@ pub struct GameObject {
     pub walkable: bool,
     pub health: Option<u32>,  // None for tiles, Some(value) for entities
     #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub attack: Option<i32>,  // Attack value for entities
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub monster: Option<bool>,  // Whether this character is a monster
+    #[serde(default)]
     pub sprites: Vec<SpriteCoord>,  // Array of sprite coordinates for randomization
     // Legacy fields for backward compatibility
     #[serde(default)]
@@ -44,6 +50,8 @@ impl GameObject {
             object_type,
             walkable,
             health: None,
+            attack: None,
+            monster: None,
             sprites: vec![SpriteCoord { x: sprite_x, y: sprite_y }],
             sprite_x: Some(sprite_x),
             sprite_y: Some(sprite_y),

@@ -129,19 +129,22 @@
                     firstTile: gameState.map?.[0]?.[0]
                 });
                 
-                // Load sprite sheets for all entities
+                // Load sprite sheets for all entities (wait for all to load)
                 if (gameState.entities) {
+                    const spriteSheetPromises = [];
                     for (const entity of gameState.entities) {
                         if (entity.sprite_sheet) {
                             console.log(`Loading sprite sheet for entity ${entity.id}: ${entity.sprite_sheet}`);
-                            try {
-                                await loadSpriteSheet(entity.sprite_sheet);
-                                console.log(`Successfully loaded sprite sheet: ${entity.sprite_sheet}`);
-                            } catch (e) {
-                                console.error(`Could not load sprite sheet "${entity.sprite_sheet}":`, e);
-                            }
+                            spriteSheetPromises.push(
+                                loadSpriteSheet(entity.sprite_sheet)
+                                    .then(() => console.log(`Successfully loaded sprite sheet: ${entity.sprite_sheet}`))
+                                    .catch((e) => console.error(`Could not load sprite sheet "${entity.sprite_sheet}":`, e))
+                            );
                         }
                     }
+                    // Wait for all sprite sheets to load before rendering
+                    await Promise.all(spriteSheetPromises);
+                    console.log('All sprite sheets loaded, rendering...');
                 }
                 
                 render();
@@ -213,6 +216,7 @@
             
             // Draw all entities (player + AI) on top of tiles
             if (gameState.entities) {
+                console.log(`Rendering ${gameState.entities.length} entities`);
                 for (const entity of gameState.entities) {
                     const destX = entity.x * TILE_SIZE;
                     const destY = entity.y * TILE_SIZE;
@@ -220,6 +224,8 @@
                     // Get sprite sheet for this entity
                     const entitySpriteSheetName = entity.sprite_sheet || DEFAULT_SPRITE_SHEET;
                     const entitySpriteSheet = getSpriteSheet(entitySpriteSheetName);
+                    
+                    console.log(`Entity ${entity.id}: sheet=${entitySpriteSheetName}, loaded=${!!entitySpriteSheet}, complete=${entitySpriteSheet?.complete}, sprite=(${entity.sprite_x},${entity.sprite_y})`);
                     
                     if (entity.sprite_x !== undefined && entity.sprite_y !== undefined && 
                         entitySpriteSheet && entitySpriteSheet.complete) {

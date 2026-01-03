@@ -107,10 +107,18 @@ impl GameState {
         // Create player entity
         if let Some(player_template) = player_obj {
             let max_health = player_template.health.unwrap_or(100);
-            let attack = player_template.properties
-                .get("attack")
-                .and_then(|s| s.parse::<i32>().ok())
+            let attack = player_template.attack
+                .or_else(|| {
+                    player_template.properties
+                        .get("attack")
+                        .and_then(|s| s.parse::<i32>().ok())
+                })
                 .unwrap_or(10);
+            
+            println!("Creating player entity: id={}, sprite_sheet={:?}, sprites={:?}", 
+                player_template.id, 
+                player_template.sprite_sheet,
+                player_template.get_sprites_vec());
             
             let player = Entity::new(
                 "player".to_string(),
@@ -122,8 +130,78 @@ impl GameState {
                 EntityController::Player,
             );
             entities.push(player);
+            println!("Player spawned at ({}, {})", player_x, player_y);
+        } else {
+            println!("WARNING: No player object found in registry!");
         }
         
+        // Spawn monsters in each room
+        let monster_templates = object_registry.get_monster_characters();
+        println!("Found {} monster templates", monster_templates.len());
+        if !monster_templates.is_empty() {
+            use rand::Rng;
+            let mut rng = rand::thread_rng();
+            let mut monster_id_counter = 0;
+            
+            println!("Spawning monsters in {} rooms", dungeon.rooms.len());
+            for room in &dungeon.rooms {
+                // Find a random walkable position within the room
+                let mut valid_positions = Vec::new();
+                for dy in 0..room.height {
+                    for dx in 0..room.width {
+                        let x = room.x + dx;
+                        let y = room.y + dy;
+                        if x < dungeon.width && y < dungeon.height {
+                            if dungeon.tiles[y][x].walkable {
+                                // Check if position is not occupied by player
+                                if !(x == player_x && y == player_y) {
+                                    // Check if position is not occupied by another entity
+                                    let occupied = entities.iter().any(|e| e.x == x && e.y == y);
+                                    if !occupied {
+                                        valid_positions.push((x, y));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                // Spawn one monster if we have valid positions
+                if !valid_positions.is_empty() {
+                    let pos_idx = rng.gen_range(0..valid_positions.len());
+                    let (monster_x, monster_y) = valid_positions[pos_idx];
+                    
+                    // Select a random monster template
+                    let monster_template = monster_templates[rng.gen_range(0..monster_templates.len())];
+                    
+                    let max_health = monster_template.health.unwrap_or(50);
+                    // Attack can be top-level field or in properties map
+                    let attack = monster_template.attack
+                        .or_else(|| {
+                            monster_template.properties
+                                .get("attack")
+                                .and_then(|s| s.parse::<i32>().ok())
+                        })
+                        .unwrap_or(5);
+                    
+                    let monster = Entity::new(
+                        format!("monster_{}", monster_id_counter),
+                        monster_x,
+                        monster_y,
+                        monster_template.id.clone(),
+                        attack,
+                        max_health,
+                        EntityController::AI,
+                    );
+                    entities.push(monster);
+                    monster_id_counter += 1;
+                    println!("Spawned monster {} at ({}, {})", monster_template.id, monster_x, monster_y);
+                }
+            }
+            println!("Total monsters spawned: {}", monster_id_counter);
+        }
+        
+        println!("Total entities created: {} (player + monsters)", entities.len());
         Self {
             dungeon,
             entities,

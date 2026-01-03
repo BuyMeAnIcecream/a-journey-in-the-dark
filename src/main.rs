@@ -117,6 +117,7 @@ async fn handle_socket(socket: WebSocket, state: SharedState, tx: Tx) {
     // Send initial game state
     let initial_state = {
         let game = state.lock().unwrap();
+        println!("Sending game state: {} entities", game.entities.len());
         // Convert entities to EntityData
         let entities: Vec<EntityData> = game.entities.iter()
             .filter(|e| e.is_alive())  // Only send alive entities
@@ -126,6 +127,9 @@ async fn handle_socket(socket: WebSocket, state: SharedState, tx: Tx) {
                     .and_then(|o| o.get_sprites_vec().first().map(|s| (s.x, s.y)))
                     .unwrap_or((0, 0));
                 let sprite_sheet = obj.and_then(|o| o.sprite_sheet.clone());
+                
+                println!("Entity {}: pos=({},{}), sprite=({},{}), sheet={:?}, controller={:?}", 
+                    entity.id, entity.x, entity.y, sprite_x, sprite_y, sprite_sheet, entity.controller);
                 
                 EntityData {
                     id: entity.id.clone(),
@@ -142,13 +146,14 @@ async fn handle_socket(socket: WebSocket, state: SharedState, tx: Tx) {
             })
             .collect();
         
-        serde_json::to_string(&GameUpdate {
+        println!("Sending {} entities to client", entities.len());
+        let update = GameUpdate {
             map: game.dungeon.tiles.clone(),
             entities,
             width: game.dungeon.width,
             height: game.dungeon.height,
-        })
-        .unwrap()
+        };
+        serde_json::to_string(&update).unwrap()
     };
     let _ = sender.send(Message::Text(initial_state)).await;
 

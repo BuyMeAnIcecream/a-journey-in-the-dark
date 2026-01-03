@@ -3,10 +3,19 @@ use crate::tile::Tile;
 use crate::tile_registry::TileRegistry;
 
 #[derive(Clone)]
+pub struct Room {
+    pub x: usize,
+    pub y: usize,
+    pub width: usize,
+    pub height: usize,
+}
+
+#[derive(Clone)]
 pub struct Dungeon {
     pub width: usize,
     pub height: usize,
     pub tiles: Vec<Vec<Tile>>,
+    pub rooms: Vec<Room>,
 }
 
 impl Dungeon {
@@ -21,14 +30,14 @@ impl Dungeon {
         };
         
         let mut tiles = vec![vec![default_wall; width]; height];
-        Self::generate_rooms(&mut tiles, width, height, registry);
-        Self { width, height, tiles }
+        let rooms = Self::generate_rooms(&mut tiles, width, height, registry);
+        Self { width, height, tiles, rooms }
     }
 
-    fn generate_rooms(tiles: &mut Vec<Vec<Tile>>, width: usize, height: usize, registry: &TileRegistry) {
+    fn generate_rooms(tiles: &mut Vec<Vec<Tile>>, width: usize, height: usize, registry: &TileRegistry) -> Vec<Room> {
         let mut rng = rand::thread_rng();
         let num_rooms = rng.gen_range(5..=10);
-        let mut rooms = Vec::new();
+        let mut rooms: Vec<Room> = Vec::new();
 
         // Generate rooms
         for _ in 0..num_rooms {
@@ -37,13 +46,18 @@ impl Dungeon {
             let x = rng.gen_range(1..(width - room_width - 1));
             let y = rng.gen_range(1..(height - room_height - 1));
 
-            let room = (x, y, room_width, room_height);
+            let room = Room {
+                x,
+                y,
+                width: room_width,
+                height: room_height,
+            };
             
             // Check for overlaps (simple check)
             let mut overlaps = false;
-            for (rx, ry, rw, rh) in &rooms {
-                if !(x + room_width < *rx || *rx + *rw < x || 
-                     y + room_height < *ry || *ry + *rh < y) {
+            for existing_room in &rooms {
+                if !(x + room_width < existing_room.x || existing_room.x + existing_room.width < x || 
+                     y + room_height < existing_room.y || existing_room.y + existing_room.height < y) {
                     overlaps = true;
                     break;
                 }
@@ -104,16 +118,16 @@ impl Dungeon {
                 rooms.push(room);
             }
         }
-
+        
         // Connect rooms with corridors
         for i in 0..rooms.len() - 1 {
-            let (x1, y1, w1, h1) = rooms[i];
-            let (x2, y2, w2, h2) = rooms[i + 1];
+            let room1 = &rooms[i];
+            let room2 = &rooms[i + 1];
             
-            let center1_x = x1 + w1 / 2;
-            let center1_y = y1 + h1 / 2;
-            let center2_x = x2 + w2 / 2;
-            let center2_y = y2 + h2 / 2;
+            let center1_x = room1.x + room1.width / 2;
+            let center1_y = room1.y + room1.height / 2;
+            let center2_x = room2.x + room2.width / 2;
+            let center2_y = room2.y + room2.height / 2;
 
             // L-shaped corridor using all walkable tiles from registry
             let floor_tiles = registry.get_walkable_tiles();
@@ -185,6 +199,8 @@ impl Dungeon {
                 }
             }
         }
+        
+        rooms
     }
 
     pub fn is_walkable(&self, x: usize, y: usize) -> bool {

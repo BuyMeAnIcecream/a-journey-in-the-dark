@@ -39,15 +39,13 @@ object_type = "character"
 walkable = true
 sprite_sheet = "rogues.png"
 health = 100
-attack = 5
+attack = 10
 monster = false
 [[game_objects.sprites]]
 x = 0
 y = 0
 
 
-[game_objects.properties]
-attack = "10"
 [[game_objects]]
 id = "orc"
 name = "Orc"

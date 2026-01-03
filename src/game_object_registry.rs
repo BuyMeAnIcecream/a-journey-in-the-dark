@@ -35,5 +35,21 @@ impl GameObjectRegistry {
     pub fn get_all_objects(&self) -> Vec<&GameObject> {
         self.objects.values().collect()
     }
+    
+    /// Get all monster characters (characters with monster=true)
+    pub fn get_monster_characters(&self) -> Vec<&GameObject> {
+        self.objects
+            .values()
+            .filter(|obj| {
+                obj.object_type == "character" && {
+                    // Check if monster is true (top-level field or in properties map)
+                    obj.monster.unwrap_or(false) ||
+                    obj.properties.get("monster")
+                        .map(|s| s == "true")
+                        .unwrap_or(false)
+                }
+            })
+            .collect()
+    }
 }
 
