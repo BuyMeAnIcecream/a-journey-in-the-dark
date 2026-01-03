@@ -1,6 +1,6 @@
 use axum::{
     extract::ws::{Message, WebSocket, WebSocketUpgrade},
-    response::{Html, Response},
+    response::{Html, Json, Response},
     routing::get,
     Router,
 };
@@ -26,6 +26,7 @@ type Tx = broadcast::Sender<String>;
 #[derive(Serialize, Deserialize, Debug, Clone)]
 struct EntityData {
     id: String,
+    object_id: String,  // Reference to GameObject (e.g., "orc", "player")
     x: usize,
     y: usize,
     sprite_x: u32,
@@ -81,6 +82,7 @@ async fn main() {
     let app = Router::new()
         .route("/", get(index))
         .route("/ws", get(websocket_handler))
+        .route("/api/map", get(generate_map_endpoint))
         .nest_service("/assets", ServeDir::new("assets"))
         .with_state((state, tx));
 
@@ -103,6 +105,58 @@ async fn main() {
 
 async fn index() -> Html<&'static str> {
     Html(include_str!("../client/index.html"))
+}
+
+async fn generate_map_endpoint() -> Json<GameUpdate> {
+    // Load config and generate a fresh map
+    let config = match config::GameConfig::load("game_config.toml") {
+        Ok(cfg) => cfg,
+        Err(_) => {
+            // If config doesn't exist, create default
+            let default_config = create_default_config();
+            let _ = default_config.save("game_config.toml");
+            default_config
+        }
+    };
+
+    let tile_registry = tile_registry::TileRegistry::load_from_config(&config);
+    let object_registry = game_object_registry::GameObjectRegistry::load_from_config(&config);
+    let game_state = GameState::new_with_registry(tile_registry, object_registry);
+    
+    // Convert entities to EntityData (only monsters, no players)
+    let entities: Vec<EntityData> = game_state.entities.iter()
+        .filter(|e| e.is_alive() && matches!(e.controller, crate::game::EntityController::AI))
+        .map(|entity| {
+            let obj = game_state.object_registry.get_object(&entity.object_id);
+            let (sprite_x, sprite_y) = obj
+                .and_then(|o| o.get_sprites_vec().first().map(|s| (s.x, s.y)))
+                .unwrap_or((0, 0));
+            let sprite_sheet = obj.and_then(|o| o.sprite_sheet.clone());
+            
+            EntityData {
+                id: entity.id.clone(),
+                object_id: entity.object_id.clone(),
+                x: entity.x,
+                y: entity.y,
+                sprite_x,
+                sprite_y,
+                sprite_sheet,
+                controller: entity.controller,
+                current_health: entity.current_health,
+                max_health: entity.max_health,
+                attack: entity.attack,
+                facing_right: entity.facing_right,
+            }
+        })
+        .collect();
+    
+    Json(GameUpdate {
+        map: game_state.dungeon.tiles.clone(),
+        entities,
+        width: game_state.dungeon.width,
+        height: game_state.dungeon.height,
+        messages: Vec::new(),
+    })
 }
 
 async fn websocket_handler(
@@ -144,6 +198,7 @@ async fn handle_socket(socket: WebSocket, state: SharedState, tx: Tx) {
                 
                 EntityData {
                     id: entity.id.clone(),
+                    object_id: entity.object_id.clone(),
                     x: entity.x,
                     y: entity.y,
                     sprite_x,
@@ -198,19 +253,20 @@ async fn handle_socket(socket: WebSocket, state: SharedState, tx: Tx) {
                             .unwrap_or((0, 0));
                         let sprite_sheet = obj.and_then(|o| o.sprite_sheet.clone());
                         
-                        EntityData {
-                            id: entity.id.clone(),
-                            x: entity.x,
-                            y: entity.y,
-                            sprite_x,
-                            sprite_y,
-                            sprite_sheet,
-                            controller: entity.controller,
-                            current_health: entity.current_health,
-                            max_health: entity.max_health,
-                            attack: entity.attack,
-                            facing_right: entity.facing_right,
-                        }
+            EntityData {
+                id: entity.id.clone(),
+                object_id: entity.object_id.clone(),
+                x: entity.x,
+                y: entity.y,
+                sprite_x,
+                sprite_y,
+                sprite_sheet,
+                controller: entity.controller,
+                current_health: entity.current_health,
+                max_health: entity.max_health,
+                attack: entity.attack,
+                facing_right: entity.facing_right,
+            }
                     })
                     .collect();
                 
