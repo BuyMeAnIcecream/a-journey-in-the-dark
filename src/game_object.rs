@@ -25,6 +25,7 @@ pub struct GameObject {
     #[serde(default)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sprite_sheet: Option<String>,  // Which sprite sheet to use (e.g., "tiles.png", "rogues.png")
+    #[serde(default)]
     pub properties: std::collections::HashMap<String, String>,  // Additional custom properties
 }
 
