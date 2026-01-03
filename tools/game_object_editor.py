@@ -44,6 +44,10 @@ class GameObjectEditor:
         
         # Load data
         self.load_config()
+        
+        # Validate config after loading - check for missing required parameters
+        self.validate_config()
+        
         self.refresh_sprite_sheets()  # Populate sprite sheet list
         self.load_sprite_sheet()  # Load default sprite sheet
         # Refresh tile palette after UI is created and config is loaded
@@ -150,6 +154,7 @@ class GameObjectEditor:
             "walkable": ("Walkable:", "walkable", bool, False, ["tile"]),  # Only for tiles
             "health": ("Health:", "health", int, False, ["character", "item"]),  # For entities
             "attack": ("Attack:", "attack", int, False, ["character", "item"]),  # For entities
+            "defense": ("Defense:", "defense", int, False, ["character", "item"]),  # For entities
             "monster": ("Monster:", "monster", bool, False, ["character"]),  # Only for characters
             "healing_power": ("Healing Power:", "healing_power", int, False, ["consumable"]),  # Only for consumables
             "sprite_sheet": ("Sprite Sheet:", "sprite_sheet", str, True, []),  # Always show
@@ -508,6 +513,194 @@ class GameObjectEditor:
         except Exception as e:
             self.log_status(f"Failed to load config: {e}", "error")
             self.config = {"game_objects": []}
+    
+    def get_required_schema(self):
+        """Define the required schema for GameObject based on current Rust struct
+        
+        Returns:
+            dict: {
+                'required_fields': [list of always-required fields],
+                'type_specific': {
+                    'character': [list of required fields for characters],
+                    'consumable': [list of required fields for consumables],
+                    ...
+                }
+            }
+        """
+        return {
+            'required_fields': [
+                'id',           # Always required
+                'name',         # Always required
+                'object_type',  # Always required
+                'walkable',     # Always required
+                'sprites',      # Always required (array, can be empty but must exist)
+            ],
+            'type_specific': {
+                'character': [
+                    # Characters should have attack (default 0 if not set)
+                    # Characters should have monster flag (default false)
+                ],
+                'consumable': [
+                    'healing_power',  # Consumables must have healing_power
+                ],
+            },
+            'optional_fields': [
+                'health',        # Optional for all types
+                'attack',        # Optional (defaults handled in code)
+                'monster',       # Optional (defaults to false)
+                'healing_power', # Required for consumables, optional otherwise
+                'sprite_sheet',  # Optional but recommended
+                'sprite_x',      # Legacy, optional
+                'sprite_y',      # Legacy, optional
+                'properties',    # Optional (defaults to empty dict)
+            ]
+        }
+    
+    def validate_config(self):
+        """Validate all game objects against the required schema
+        
+        Shows a dialog forcing user to fix missing required parameters before continuing.
+        """
+        if not self.config or "game_objects" not in self.config:
+            return
+        
+        schema = self.get_required_schema()
+        required_fields = schema['required_fields']
+        type_specific = schema['type_specific']
+        
+        issues = []  # List of (object_index, object_id, object_name, missing_fields)
+        
+        for idx, obj in enumerate(self.config.get("game_objects", [])):
+            missing_fields = []
+            obj_type = obj.get("object_type", "unknown")
+            
+            # Check required fields (always required)
+            for field in required_fields:
+                if field == 'sprites':
+                    # sprites must exist as a list (can be empty)
+                    if 'sprites' not in obj or not isinstance(obj.get('sprites'), list):
+                        missing_fields.append('sprites')
+                elif field not in obj:
+                    missing_fields.append(field)
+            
+            # Check type-specific required fields
+            if obj_type in type_specific:
+                for field in type_specific[obj_type]:
+                    if field not in obj or obj[field] is None:
+                        missing_fields.append(field)
+            
+            if missing_fields:
+                issues.append((idx, obj.get('id', f'object_{idx}'), obj.get('name', 'Unnamed'), missing_fields))
+        
+        if issues:
+            # Show validation dialog
+            self.show_validation_dialog(issues)
+    
+    def show_validation_dialog(self, issues):
+        """Show a dialog listing all objects with missing required parameters
+        
+        Args:
+            issues: List of (object_index, object_id, object_name, missing_fields)
+        """
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Config Validation Required")
+        dialog.geometry("700x500")
+        dialog.transient(self.root)
+        dialog.grab_set()  # Make it modal
+        
+        # Message
+        msg_frame = ttk.Frame(dialog, padding="10")
+        msg_frame.pack(fill=tk.X)
+        
+        ttk.Label(
+            msg_frame,
+            text="Some game objects are missing required parameters.",
+            font=("Arial", 10, "bold")
+        ).pack(anchor=tk.W)
+        
+        ttk.Label(
+            msg_frame,
+            text="Please update all objects below before continuing.",
+            foreground="red"
+        ).pack(anchor=tk.W, pady=(5, 0))
+        
+        # List of issues
+        list_frame = ttk.Frame(dialog, padding="10")
+        list_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        
+        # Scrollable list
+        scrollbar = ttk.Scrollbar(list_frame)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        listbox = tk.Listbox(list_frame, yscrollcommand=scrollbar.set, font=("Courier", 9))
+        listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar.config(command=listbox.yview)
+        
+        # Populate list
+        for idx, obj_id, obj_name, missing_fields in issues:
+            obj_display = f"[{obj_id}] {obj_name}"
+            missing_str = ", ".join(missing_fields)
+            listbox.insert(tk.END, f"{obj_display}")
+            listbox.insert(tk.END, f"  Missing: {missing_str}")
+            listbox.insert(tk.END, "")  # Empty line
+        
+        # Buttons
+        button_frame = ttk.Frame(dialog, padding="10")
+        button_frame.pack(fill=tk.X)
+        
+        def go_to_object(event=None):
+            selection = listbox.curselection()
+            if selection:
+                # Find which object this corresponds to
+                line_idx = selection[0]
+                # Each object takes 3 lines (name, missing, empty)
+                obj_idx = line_idx // 3
+                if obj_idx < len(issues):
+                    actual_obj_idx = issues[obj_idx][0]
+                    # Select the object in the main list
+                    self.object_listbox.selection_clear(0, tk.END)
+                    self.object_listbox.selection_set(actual_obj_idx)
+                    self.object_listbox.see(actual_obj_idx)
+                    self.on_object_select(None)
+                    dialog.destroy()
+        
+        def fix_all():
+            """Try to fix all issues with default values"""
+            fixed_count = 0
+            for idx, obj_id, obj_name, missing_fields in issues:
+                obj = self.config["game_objects"][idx]
+                obj_type = obj.get("object_type", "unknown")
+                
+                for field in missing_fields:
+                    if field == 'sprites':
+                        obj['sprites'] = []
+                        # Try to create from legacy sprite_x/sprite_y if available
+                        if 'sprite_x' in obj and 'sprite_y' in obj:
+                            obj['sprites'] = [{"x": obj['sprite_x'], "y": obj['sprite_y']}]
+                        fixed_count += 1
+                    elif field == 'healing_power' and obj_type == 'consumable':
+                        obj['healing_power'] = 20  # Default healing power
+                        fixed_count += 1
+                    # Add more default values as needed
+            
+            if fixed_count > 0:
+                self.log_status(f"Auto-fixed {fixed_count} missing fields with defaults", "success")
+                self.save_config()
+                dialog.destroy()
+                # Re-validate to check if there are still issues
+                self.validate_config()
+            else:
+                messagebox.showinfo("Cannot Auto-Fix", "Some fields require manual input. Please fix them manually.")
+        
+        ttk.Button(button_frame, text="Go to Selected Object", command=go_to_object).pack(side=tk.LEFT, padx=5)
+        ttk.Button(button_frame, text="Try Auto-Fix Missing Fields", command=fix_all).pack(side=tk.LEFT, padx=5)
+        ttk.Button(button_frame, text="Close (I'll fix manually)", command=dialog.destroy).pack(side=tk.RIGHT, padx=5)
+        
+        # Double-click to go to object
+        listbox.bind('<Double-Button-1>', go_to_object)
+        
+        # Focus on listbox
+        listbox.focus_set()
     
     def create_default_objects(self):
         """Create default game objects"""
@@ -1138,6 +1331,13 @@ class GameObjectEditor:
                 # Remove from properties map if it was there
                 if "properties" in self.current_object and "attack" in self.current_object["properties"]:
                     del self.current_object["properties"]["attack"]
+            elif key == "defense":
+                val = var.get()
+                # Store defense as top-level property (not in properties map)
+                self.current_object["defense"] = int(val) if val.strip() else None
+                # Remove from properties map if it was there
+                if "properties" in self.current_object and "defense" in self.current_object["properties"]:
+                    del self.current_object["properties"]["defense"]
             elif key == "sprite_sheet":
                 val = var.get().strip()
                 if val:
@@ -1209,6 +1409,39 @@ class GameObjectEditor:
         Args:
             show_message: If True, show success message. Default False for auto-save.
         """
+        # Validate before saving
+        schema = self.get_required_schema()
+        required_fields = schema['required_fields']
+        type_specific = schema['type_specific']
+        
+        issues = []
+        for idx, obj in enumerate(self.config.get("game_objects", [])):
+            missing_fields = []
+            obj_type = obj.get("object_type", "unknown")
+            
+            # Check required fields
+            for field in required_fields:
+                if field == 'sprites':
+                    if 'sprites' not in obj or not isinstance(obj.get('sprites'), list):
+                        missing_fields.append('sprites')
+                elif field not in obj:
+                    missing_fields.append(field)
+            
+            # Check type-specific
+            if obj_type in type_specific:
+                for field in type_specific[obj_type]:
+                    if field not in obj or obj[field] is None:
+                        missing_fields.append(field)
+            
+            if missing_fields:
+                issues.append((idx, obj.get('id', f'object_{idx}'), obj.get('name', 'Unnamed'), missing_fields))
+        
+        if issues:
+            # Show validation dialog and prevent save
+            self.show_validation_dialog(issues)
+            self.log_status("Cannot save: Some objects are missing required parameters", "error")
+            return False
+        
         try:
             # Clean up the config structure before saving
             # Ensure all objects have proper structure
@@ -1249,8 +1482,10 @@ class GameObjectEditor:
                 self.log_status(f"Config saved to {self.config_path.name}", "success")
             # Update server status after saving
             self.root.after(500, self.check_server_status)
+            return True
         except Exception as e:
             self.log_status(f"Failed to save config: {e}", "error")
+            return False
     
     def find_server_process(self):
         """Find the running server process"""

@@ -111,6 +111,7 @@ pub struct Entity {
     pub y: usize,
     pub object_id: String,  // Reference to GameObject
     pub attack: i32,
+    pub defense: i32,
     pub max_health: u32,
     pub current_health: u32,
     pub controller: EntityController,
@@ -132,6 +133,7 @@ impl Entity {
         y: usize,
         object_id: String,
         attack: i32,
+        defense: i32,
         max_health: u32,
         controller: EntityController,
     ) -> Self {
@@ -141,6 +143,7 @@ impl Entity {
             y,
             object_id,
             attack,
+            defense,
             max_health,
             current_health: max_health,
             controller,
@@ -239,12 +242,21 @@ impl GameState {
                         })
                         .unwrap_or(5);
                     
+                    let defense = monster_template.defense
+                        .or_else(|| {
+                            monster_template.properties
+                                .get("defense")
+                                .and_then(|s| s.parse::<i32>().ok())
+                        })
+                        .unwrap_or(0);
+                    
                     let monster = Entity::new(
                         format!("monster_{}", monster_id_counter),
                         monster_x,
                         monster_y,
                         monster_template.id.clone(),
                         attack,
+                        defense,
                         max_health,
                         EntityController::AI,
                     );
@@ -617,6 +629,7 @@ impl GameState {
                         monster_y,
                         monster_template.id.clone(),
                         monster_template.attack.unwrap_or(5) as i32,
+                        monster_template.defense.unwrap_or(0) as i32,
                         monster_template.health.unwrap_or(20),
                         EntityController::AI,
                     );
@@ -781,12 +794,21 @@ impl GameState {
                 })
                 .unwrap_or(10);
             
+            let defense = player_template.defense
+                .or_else(|| {
+                    player_template.properties
+                        .get("defense")
+                        .and_then(|s| s.parse::<i32>().ok())
+                })
+                .unwrap_or(0);
+            
             let player = Entity::new(
                 player_id,
                 spawn_x,
                 spawn_y,
                 player_template.id.clone(),
                 attack,
+                defense,
                 max_health,
                 EntityController::Player,
             );
@@ -812,9 +834,16 @@ impl GameState {
         }
         
         // Get attacker's values before mutable borrow
-        let damage = self.entities[attacker_idx].attack.max(0) as u32;
+        let attacker_attack = self.entities[attacker_idx].attack;
         let attacker_id = self.entities[attacker_idx].id.clone();
         let attacker_x = self.entities[attacker_idx].x;
+        
+        // Get target's defense
+        let target_defense = self.entities[target_idx].defense;
+        
+        // Calculate damage: attack - defense, minimum 1
+        let raw_damage = attacker_attack - target_defense;
+        let damage = raw_damage.max(1) as u32;  // Minimum 1 damage
         
         // Apply damage to target
         let target = &mut self.entities[target_idx];

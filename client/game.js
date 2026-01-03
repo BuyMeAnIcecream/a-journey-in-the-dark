@@ -399,6 +399,9 @@ function updateHealthBar() {
         document.getElementById('healthFill').style.width = '0%';
         document.getElementById('healthFill').className = 'health-fill critical';
         document.getElementById('attackValue').textContent = '-';
+        if (document.getElementById('defenseValue')) {
+            document.getElementById('defenseValue').textContent = '-';
+        }
         return;
     }
     
@@ -424,6 +427,11 @@ function updateHealthBar() {
     
     // Update attack value
     document.getElementById('attackValue').textContent = player.attack.toString();
+    
+    // Update defense value
+    if (document.getElementById('defenseValue')) {
+        document.getElementById('defenseValue').textContent = (player.defense || 0).toString();
+    }
 }
 
 // Handle game state updates

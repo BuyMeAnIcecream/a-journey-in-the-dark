@@ -36,6 +36,7 @@ struct EntityData {
     current_health: u32,
     max_health: u32,
     attack: i32,
+    defense: i32,
     facing_right: bool,  // true = facing right, false = facing left (needs mirroring)
 }
 
@@ -165,6 +166,7 @@ async fn generate_map_endpoint() -> Json<GameUpdate> {
                 current_health: entity.current_health,
                 max_health: entity.max_health,
                 attack: entity.attack,
+                defense: entity.defense,
                 facing_right: entity.facing_right,
             }
         })
@@ -259,6 +261,7 @@ async fn handle_socket(socket: WebSocket, state: SharedState, tx: Tx) {
                     current_health: entity.current_health,
                     max_health: entity.max_health,
                     attack: entity.attack,
+                    defense: entity.defense,
                     facing_right: entity.facing_right,
                 }
             })
@@ -353,6 +356,7 @@ async fn handle_socket(socket: WebSocket, state: SharedState, tx: Tx) {
                             current_health: entity.current_health,
                             max_health: entity.max_health,
                             attack: entity.attack,
+                            defense: entity.defense,
                             facing_right: entity.facing_right,
                         }
                     })

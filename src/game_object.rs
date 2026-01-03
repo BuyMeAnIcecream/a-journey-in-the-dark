@@ -18,6 +18,9 @@ pub struct GameObject {
     pub attack: Option<i32>,  // Attack value for entities
     #[serde(default)]
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub defense: Option<i32>,  // Defense value for entities
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub monster: Option<bool>,  // Whether this character is a monster
     #[serde(default)]
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -54,6 +57,7 @@ impl GameObject {
             walkable,
             health: None,
             attack: None,
+            defense: None,
             monster: None,
             healing_power: None,
             sprites: vec![SpriteCoord { x: sprite_x, y: sprite_y }],
