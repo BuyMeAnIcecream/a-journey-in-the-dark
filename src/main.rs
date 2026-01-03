@@ -185,7 +185,7 @@ async fn handle_socket(socket: WebSocket, state: SharedState, tx: Tx) {
         while let Some(Ok(Message::Text(text))) = receiver.next().await {
             if let Ok(cmd) = serde_json::from_str::<PlayerCommand>(&text) {
                 let mut game = state.lock().unwrap();
-                let combat_message = game.handle_command(&cmd, &player_id_clone);
+                let combat_messages = game.handle_command(&cmd, &player_id_clone);
                 
                 // Broadcast update
                 // Convert entities to EntityData
@@ -214,7 +214,7 @@ async fn handle_socket(socket: WebSocket, state: SharedState, tx: Tx) {
                     })
                     .collect();
                 
-                let messages = combat_message.into_iter().collect::<Vec<_>>();
+                let messages = combat_messages;
                 
                 let update = serde_json::to_string(&GameUpdate {
                     map: game.dungeon.tiles.clone(),

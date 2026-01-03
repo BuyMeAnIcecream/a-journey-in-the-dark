@@ -196,7 +196,9 @@ impl GameState {
         self.entities.iter_mut().find(|e| e.controller == EntityController::Player)
     }
 
-    pub fn handle_command(&mut self, cmd: &PlayerCommand, player_id: &str) -> Option<CombatMessage> {
+    pub fn handle_command(&mut self, cmd: &PlayerCommand, player_id: &str) -> Vec<CombatMessage> {
+        let mut messages = Vec::new();
+        
         // Find the specific player entity by ID
         let player_idx = self.entities.iter().position(|e| e.id == player_id && e.controller == EntityController::Player);
         
@@ -206,7 +208,11 @@ impl GameState {
                 "move_down" => (0, 1),
                 "move_left" => (-1, 0),
                 "move_right" => (1, 0),
-                _ => return None,
+                _ => {
+                    // Still process AI even if player action is invalid
+                    messages.extend(self.process_ai_turns());
+                    return messages;
+                },
             };
             
             // Check if there's an enemy at the target position
@@ -225,14 +231,20 @@ impl GameState {
                     e.controller == EntityController::AI
                 }) {
                     // Attack instead of moving
-                    return self.attack_entity(idx, target_idx);
+                    if let Some(msg) = self.attack_entity(idx, target_idx) {
+                        messages.push(msg);
+                    }
+                } else {
+                    // No enemy, try to move
+                    self.move_entity(idx, dx, dy);
                 }
             }
-            
-            // No enemy, try to move
-            self.move_entity(idx, dx, dy);
         }
-        None
+        
+        // After player turn, process all AI turns
+        messages.extend(self.process_ai_turns());
+        
+        messages
     }
     
     pub fn add_player(&mut self, player_id: String) -> Option<usize> {
@@ -414,10 +426,79 @@ impl GameState {
         }
     }
     
-    #[allow(dead_code)]
-    pub fn update_ai(&mut self) {
-        // TODO: Implement AI behavior
-        // For now, AI entities don't move
+    fn process_ai_turns(&mut self) -> Vec<CombatMessage> {
+        let mut messages = Vec::new();
+        
+        // Get all player positions for AI to chase
+        let player_positions: Vec<(usize, usize)> = self.entities
+            .iter()
+            .filter(|e| e.controller == EntityController::Player && e.is_alive())
+            .map(|e| (e.x, e.y))
+            .collect();
+        
+        // Process each AI entity
+        let ai_indices: Vec<usize> = self.entities
+            .iter()
+            .enumerate()
+            .filter(|(_, e)| e.controller == EntityController::AI && e.is_alive())
+            .map(|(idx, _)| idx)
+            .collect();
+        
+        for ai_idx in ai_indices {
+            let ai_entity = &self.entities[ai_idx];
+            let ai_x = ai_entity.x;
+            let ai_y = ai_entity.y;
+            
+            // Find nearest player within 5 tile radius
+            let mut nearest_player: Option<(usize, usize)> = None;
+            let mut min_distance = 6; // 5 + 1 to check if within range
+            
+            for (px, py) in &player_positions {
+                let dx = if ai_x > *px { ai_x - *px } else { *px - ai_x };
+                let dy = if ai_y > *py { ai_y - *py } else { *py - ai_y };
+                let distance = dx.max(dy); // Chebyshev distance (max of dx, dy)
+                
+                if distance <= 5 && distance < min_distance {
+                    min_distance = distance;
+                    nearest_player = Some((*px, *py));
+                }
+            }
+            
+            if let Some((target_x, target_y)) = nearest_player {
+                // Chase: move towards player
+                let dx = if target_x > ai_x { 1 } else if target_x < ai_x { -1 } else { 0 };
+                let dy = if target_y > ai_y { 1 } else if target_y < ai_y { -1 } else { 0 };
+                
+                let new_x = (ai_x as i32 + dx) as usize;
+                let new_y = (ai_y as i32 + dy) as usize;
+                
+                // Check if there's a player at target position (attack)
+                if let Some(target_idx) = self.entities.iter().position(|e| {
+                    e.x == new_x && 
+                    e.y == new_y && 
+                    e.is_alive() &&
+                    e.controller == EntityController::Player
+                }) {
+                    // Attack player
+                    if let Some(msg) = self.attack_entity(ai_idx, target_idx) {
+                        messages.push(msg);
+                    }
+                } else {
+                    // Move towards player
+                    self.move_entity(ai_idx, dx, dy);
+                }
+            } else {
+                // No player nearby, wander randomly
+                let directions = [(0, -1), (0, 1), (-1, 0), (1, 0)];
+                use rand::Rng;
+                let mut rng = rand::thread_rng();
+                let (dx, dy) = directions[rng.gen_range(0..directions.len())];
+                
+                self.move_entity(ai_idx, dx, dy);
+            }
+        }
+        
+        messages
     }
 }
 
