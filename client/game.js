@@ -200,7 +200,113 @@ function render() {
         }
     }
     
-    // Draw all entities (player + AI) on top of tiles, but behind chests and consumables
+    // Draw closed chests first (behind entities, so they block movement visually)
+    if (gameState.chests && Array.isArray(gameState.chests)) {
+        for (const chest of gameState.chests) {
+            const isOpen = chest.is_open === true || chest.is_open === "true";
+            if (isOpen) {
+                continue; // Skip open chests - they'll be drawn separately
+            }
+            
+            const chestX = chest.x;
+            const chestY = chest.y;
+            
+            // Check if chest is within viewport
+            if (chestX >= viewportMinX && chestX <= viewportMaxX &&
+                chestY >= viewportMinY && chestY <= viewportMaxY) {
+                
+                // Calculate position relative to viewport, with offset to center on canvas
+                const viewportX = chestX - viewportMinX;
+                const viewportY = chestY - viewportMinY;
+                const destX = viewportX * TILE_SIZE + offsetX;
+                const destY = viewportY * TILE_SIZE + offsetY;
+                
+                // Get sprite sheet for this chest
+                const chestSpriteSheet = getSpriteSheet(chest.sprite_sheet || DEFAULT_SPRITE_SHEET);
+                
+                // Use closed chest sprite coordinates
+                const spriteX = chest.sprite_x;
+                const spriteY = chest.sprite_y;
+                
+                // Debug: log to verify we're using the right coordinates
+                // console.log(`Closed chest at (${chestX}, ${chestY}): sprite=(${spriteX}, ${spriteY}), open_sprite=(${chest.open_sprite_x}, ${chest.open_sprite_y}), is_open=${chest.is_open}`);
+                
+                if (spriteX !== undefined && spriteY !== undefined && 
+                    chestSpriteSheet && chestSpriteSheet.complete) {
+                    const srcX = spriteX * SPRITE_SHEET_TILE_SIZE;
+                    const srcY = spriteY * SPRITE_SHEET_TILE_SIZE;
+                    
+                    ctx.globalCompositeOperation = 'source-over';
+                    ctx.imageSmoothingEnabled = false;
+                    
+                    ctx.drawImage(
+                        chestSpriteSheet,
+                        srcX, srcY, SPRITE_SHEET_TILE_SIZE, SPRITE_SHEET_TILE_SIZE,
+                        destX, destY, TILE_SIZE, TILE_SIZE
+                    );
+                } else {
+                    // Fallback to colored rectangle if sprite not available
+                    ctx.fillStyle = '#654321'; // Dark brown for closed chests
+                    ctx.fillRect(destX, destY, TILE_SIZE, TILE_SIZE);
+                }
+            }
+        }
+    }
+    
+    // Draw open chests before entities (so they appear behind characters but are still visible)
+    if (gameState.chests && Array.isArray(gameState.chests)) {
+        for (const chest of gameState.chests) {
+            const isOpen = chest.is_open === true || chest.is_open === "true";
+            if (!isOpen) {
+                continue; // Skip closed chests - they were already drawn
+            }
+            
+            const chestX = chest.x;
+            const chestY = chest.y;
+            
+            // Check if chest is within viewport
+            if (chestX >= viewportMinX && chestX <= viewportMaxX &&
+                chestY >= viewportMinY && chestY <= viewportMaxY) {
+                
+                // Calculate position relative to viewport, with offset to center on canvas
+                const viewportX = chestX - viewportMinX;
+                const viewportY = chestY - viewportMinY;
+                const destX = viewportX * TILE_SIZE + offsetX;
+                const destY = viewportY * TILE_SIZE + offsetY;
+                
+                // Get sprite sheet for this chest
+                const chestSpriteSheet = getSpriteSheet(chest.sprite_sheet || DEFAULT_SPRITE_SHEET);
+                
+                // Use open chest sprite coordinates
+                const spriteX = chest.open_sprite_x;
+                const spriteY = chest.open_sprite_y;
+                
+                // Debug: log to verify we're using the right coordinates
+                // console.log(`Open chest at (${chestX}, ${chestY}): sprite=(${chest.sprite_x}, ${chest.sprite_y}), open_sprite=(${spriteX}, ${spriteY}), is_open=${chest.is_open}`);
+                
+                if (spriteX !== undefined && spriteY !== undefined && 
+                    chestSpriteSheet && chestSpriteSheet.complete) {
+                    const srcX = spriteX * SPRITE_SHEET_TILE_SIZE;
+                    const srcY = spriteY * SPRITE_SHEET_TILE_SIZE;
+                    
+                    ctx.globalCompositeOperation = 'source-over';
+                    ctx.imageSmoothingEnabled = false;
+                    
+                    ctx.drawImage(
+                        chestSpriteSheet,
+                        srcX, srcY, SPRITE_SHEET_TILE_SIZE, SPRITE_SHEET_TILE_SIZE,
+                        destX, destY, TILE_SIZE, TILE_SIZE
+                    );
+                } else {
+                    // Fallback to colored rectangle if sprite not available
+                    ctx.fillStyle = '#8b4513'; // Light brown for open chests
+                    ctx.fillRect(destX, destY, TILE_SIZE, TILE_SIZE);
+                }
+            }
+        }
+    }
+    
+    // Draw all entities (player + AI) on top of tiles, closed chests, and open chests, but behind consumables
     if (gameState.entities) {
         for (const entity of gameState.entities) {
             // Check if entity is within viewport
@@ -271,53 +377,6 @@ function render() {
                     ctx.fillStyle = '#ff0000';
                 }
                 ctx.fillRect(destX, destY, TILE_SIZE, TILE_SIZE);
-            }
-        }
-    }
-    
-    // Draw chests on top of tiles and entities, but behind consumables
-    if (gameState.chests && Array.isArray(gameState.chests)) {
-        for (const chest of gameState.chests) {
-            const chestX = chest.x;
-            const chestY = chest.y;
-            
-            // Check if chest is within viewport
-            if (chestX >= viewportMinX && chestX <= viewportMaxX &&
-                chestY >= viewportMinY && chestY <= viewportMaxY) {
-                
-                // Calculate position relative to viewport, with offset to center on canvas
-                const viewportX = chestX - viewportMinX;
-                const viewportY = chestY - viewportMinY;
-                const destX = viewportX * TILE_SIZE + offsetX;
-                const destY = viewportY * TILE_SIZE + offsetY;
-                
-                // Get sprite sheet for this chest
-                const chestSpriteSheet = getSpriteSheet(chest.sprite_sheet || DEFAULT_SPRITE_SHEET);
-                
-                // Use open sprite if chest is open, otherwise use closed sprite
-                // Note: is_open should be a boolean, but check for truthy/falsy to be safe
-                const isOpen = chest.is_open === true || chest.is_open === "true";
-                const spriteX = isOpen ? chest.open_sprite_x : chest.sprite_x;
-                const spriteY = isOpen ? chest.open_sprite_y : chest.sprite_y;
-                
-                if (spriteX !== undefined && spriteY !== undefined && 
-                    chestSpriteSheet && chestSpriteSheet.complete) {
-                    const srcX = spriteX * SPRITE_SHEET_TILE_SIZE;
-                    const srcY = spriteY * SPRITE_SHEET_TILE_SIZE;
-                    
-                    ctx.globalCompositeOperation = 'source-over';
-                    ctx.imageSmoothingEnabled = false;
-                    
-                    ctx.drawImage(
-                        chestSpriteSheet,
-                        srcX, srcY, SPRITE_SHEET_TILE_SIZE, SPRITE_SHEET_TILE_SIZE,
-                        destX, destY, TILE_SIZE, TILE_SIZE
-                    );
-                } else {
-                    // Fallback to colored rectangle if sprite not available
-                    ctx.fillStyle = isOpen ? '#8b4513' : '#654321'; // Brown for chests (darker when closed)
-                    ctx.fillRect(destX, destY, TILE_SIZE, TILE_SIZE);
-                }
             }
         }
     }

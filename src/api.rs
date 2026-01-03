@@ -135,35 +135,53 @@ pub fn game_state_to_update(
     // Convert chests to ChestData
     let chests: Vec<ChestData> = game.chests.iter()
         .map(|chest| {
-            let closed_obj = game.object_registry.get_object(&chest.object_id);
-            let (sprite_x, sprite_y) = closed_obj
-                .and_then(|o| o.get_sprites_vec().first().map(|s| (s.x, s.y)))
-                .unwrap_or((0, 0));
-            let sprite_sheet = closed_obj.and_then(|o| o.sprite_sheet.clone());
+            // Get chest object
+            let chest_obj = game.object_registry.get_object(&chest.object_id);
             
-            // Calculate open sprite coordinates (only used when chest is open)
-            let (open_sprite_x, open_sprite_y) = if let Some(open_id) = &chest.open_object_id {
-                if let Some(open_obj) = game.object_registry.get_object(open_id) {
-                    open_obj.get_sprites_vec().first().map(|s| (s.x, s.y)).unwrap_or((sprite_x, sprite_y))
+            // Get before (closed) sprite coordinates
+            let (sprite_x, sprite_y) = if let Some(obj) = chest_obj {
+                let before_sprites = obj.get_interactable_sprites(false);
+                if let Some(sprite) = before_sprites.first() {
+                    (sprite.x, sprite.y)
                 } else {
-                    (sprite_x, sprite_y)  // Fallback to closed sprite if open object not found
+                    eprintln!("WARNING: Chest object '{}' has no sprites for before state at ({}, {})", 
+                        chest.object_id, chest.x, chest.y);
+                    (0, 0)
                 }
             } else {
-                (sprite_x, sprite_y)  // No open object defined, use closed sprite
+                eprintln!("WARNING: Chest object '{}' not found for chest at ({}, {})", 
+                    chest.object_id, chest.x, chest.y);
+                (0, 0)
             };
+            
+            // Get after (open) sprite coordinates
+            let (open_sprite_x, open_sprite_y) = if let Some(obj) = chest_obj {
+                let after_sprites = obj.get_interactable_sprites(true);
+                if let Some(sprite) = after_sprites.first() {
+                    (sprite.x, sprite.y)
+                } else {
+                    eprintln!("WARNING: Chest object '{}' has no sprites for after state at ({}, {}), using before sprite", 
+                        chest.object_id, chest.x, chest.y);
+                    (sprite_x, sprite_y)  // Fallback to before sprite
+                }
+            } else {
+                (sprite_x, sprite_y)  // Fallback to before sprite if object not found
+            };
+            
+            let sprite_sheet = chest_obj.and_then(|o| o.sprite_sheet.clone());
             
             ChestData {
                 id: chest.id.clone(),
-                object_id: chest.object_id.clone(),
-                open_object_id: chest.open_object_id.clone(),
+                object_id: chest.object_id.clone(),  // Chest object ID (contains interactable data)
+                open_object_id: None,  // Deprecated - no longer used
                 x: chest.x,
                 y: chest.y,
-                sprite_x,
-                sprite_y,
-                open_sprite_x,
-                open_sprite_y,
+                sprite_x,  // Before (closed) state sprite coordinates
+                sprite_y,  // Before (closed) state sprite coordinates
+                open_sprite_x,  // After (open) state sprite coordinates
+                open_sprite_y,  // After (open) state sprite coordinates
                 sprite_sheet,
-                is_open: chest.is_open,
+                is_open: chest.is_open,  // Current state: false = before (closed), true = after (open)
             }
         })
         .collect();

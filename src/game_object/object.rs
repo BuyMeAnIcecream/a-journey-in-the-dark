@@ -35,7 +35,10 @@ pub struct GameObject {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub healing_power: Option<u32>,  // Healing power for consumables
     #[serde(default)]
-    pub sprites: Vec<SpriteCoord>,  // Array of sprite coordinates for randomization
+    pub sprites: Vec<SpriteCoord>,  // Array of sprite coordinates for randomization (default state, or "before" for interactables)
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub interactable: Option<crate::game_object::InteractableData>,  // For interactable objects (chests, doors, etc.) with before/after states
     // Legacy fields for backward compatibility
     #[serde(default)]
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -73,6 +76,7 @@ impl GameObject {
             monster: None,
             healing_power: None,
             sprites: vec![SpriteCoord { x: sprite_x, y: sprite_y }],
+            interactable: None,
             sprite_x: Some(sprite_x),
             sprite_y: Some(sprite_y),
             sprite_sheet: None,
@@ -104,6 +108,53 @@ impl GameObject {
     pub fn with_health(mut self, health: u32) -> Self {
         self.health = Some(health);
         self
+    }
+    
+    /// Get sprites for interactable state (before=false, after=true).
+    /// For interactable objects: sprites[0] = before (closed), sprites[1] = after (open)
+    /// Returns default sprites if not interactable or if sprites array is too short.
+    pub fn get_interactable_sprites(&self, is_after: bool) -> Vec<SpriteCoord> {
+        // Check if this is an interactable object (chest, door, etc.)
+        // We check both the interactable marker and object_type for safety
+        if self.interactable.is_some() || self.object_type == "chest" {
+            let sprites = self.get_sprites_vec();
+            if is_after {
+                // After state: use sprites[1] if available, fallback to sprites[0]
+                if sprites.len() > 1 {
+                    vec![sprites[1]]
+                } else if !sprites.is_empty() {
+                    vec![sprites[0]]  // Fallback to first sprite
+                } else {
+                    vec![]
+                }
+            } else {
+                // Before state: use sprites[0]
+                if !sprites.is_empty() {
+                    vec![sprites[0]]
+                } else {
+                    vec![]
+                }
+            }
+        } else {
+            // Not an interactable, return default sprites
+            self.get_sprites_vec()
+        }
+    }
+    
+    /// Get walkable status for interactable state.
+    /// Before state: always false (non-walkable)
+    /// After state: always true (walkable)
+    /// Returns base walkable if not interactable.
+    pub fn get_interactable_walkable(&self, is_after: bool) -> bool {
+        // Check if this is an interactable object (chest, door, etc.)
+        // We check both the interactable marker and object_type for safety
+        if self.interactable.is_some() || self.object_type == "chest" {
+            // Interactable objects: before = false, after = true
+            is_after
+        } else {
+            // Not an interactable, return base walkable
+            self.walkable
+        }
     }
 
     #[allow(dead_code)]

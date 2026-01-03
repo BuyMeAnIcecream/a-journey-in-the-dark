@@ -137,15 +137,6 @@ sprite_sheet = "tiles.png"
 x = 0
 y = 17
 
-
-[[game_objects]]
-id = "chest_wood_open"
-name = "Open Wooden Chest"
-object_type = "chest"
-walkable = false
-monster = false
-healing_power = 0
-sprite_sheet = "tiles.png"
 [[game_objects.sprites]]
 x = 1
 y = 17

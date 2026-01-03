@@ -185,20 +185,11 @@ impl MapGenerator {
                         // Select first chest template (or random if multiple)
                         let chest_template = chest_templates[rng.gen_range(0..chest_templates.len())];
                         
-                        // Find open chest template (look for object with same name + "_open" or "chest_open")
-                        let open_chest_id = format!("{}_open", chest_template.id);
-                        let open_chest_obj = object_registry.get_object(&open_chest_id);
-                        let open_object_id = open_chest_obj.map(|_| open_chest_id).or_else(|| {
-                            // Try "chest_open" as fallback
-                            object_registry.get_object("chest_open").map(|_| "chest_open".to_string())
-                        });
-                        
                         let chest = Chest {
                             id: format!("chest_{}", chest_id_counter),
                             x: chest_x,
                             y: chest_y,
                             object_id: chest_template.id.clone(),
-                            open_object_id,
                             is_open: false,
                         };
                         chests.push(chest);
@@ -381,18 +372,11 @@ impl MapGenerator {
                         let (chest_x, chest_y) = valid_positions[pos_idx];
                         let chest_template = chest_templates[rng.gen_range(0..chest_templates.len())];
                         
-                        let open_chest_id = format!("{}_open", chest_template.id);
-                        let open_chest_obj = object_registry.get_object(&open_chest_id);
-                        let open_object_id = open_chest_obj.map(|_| open_chest_id).or_else(|| {
-                            object_registry.get_object("chest_open").map(|_| "chest_open".to_string())
-                        });
-                        
                         let chest = Chest {
                             id: format!("chest_{}", chest_id_counter),
                             x: chest_x,
                             y: chest_y,
                             object_id: chest_template.id.clone(),
-                            open_object_id,
                             is_open: false,  // Always spawn closed
                         };
                         chests.push(chest);

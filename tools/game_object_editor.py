@@ -267,6 +267,26 @@ class GameObjectEditor:
         ttk.Button(sprite_btn_frame, text="Add from Click", command=self.add_sprite_from_click, width=15).pack(side=tk.LEFT, padx=(0, 5))
         ttk.Button(sprite_btn_frame, text="Remove Selected", command=self.remove_sprite, width=15).pack(side=tk.LEFT)
         
+        # Interactable section (for chests, doors, etc.)
+        # For interactable objects: sprites[0] = before (closed), sprites[1] = after (open)
+        # Before is always non-walkable, after is always walkable
+        self.interactable_row = sprite_row + 3
+        self.interactable_frame = ttk.LabelFrame(middle_panel, text="Interactable (Before/After States)", padding="5")
+        self.interactable_frame.grid(row=self.interactable_row, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(20, 5))
+        
+        ttk.Label(self.interactable_frame, text="For interactable objects:", font=("Arial", 9)).grid(
+            row=0, column=0, columnspan=2, sticky=tk.W, pady=(0, 5))
+        ttk.Label(self.interactable_frame, text="• sprites[0] = Before state (closed, non-walkable)", font=("Arial", 8)).grid(
+            row=1, column=0, columnspan=2, sticky=tk.W, pady=2)
+        ttk.Label(self.interactable_frame, text="• sprites[1] = After state (open, walkable)", font=("Arial", 8)).grid(
+            row=2, column=0, columnspan=2, sticky=tk.W, pady=2)
+        
+        # Info label
+        info_label = ttk.Label(self.interactable_frame, 
+                              text="Use the main 'Sprites' list above. First sprite = closed, second sprite = open.",
+                              font=("Arial", 8), foreground="gray", wraplength=300)
+        info_label.grid(row=3, column=0, columnspan=2, sticky=tk.W, pady=(10, 5))
+        
         # Custom properties removed - all properties are now defined in schema
         
         # Note: Save is now handled by the main "Save" button at the bottom
@@ -445,6 +465,14 @@ class GameObjectEditor:
         if level == "success":
             self.root.after(3000, lambda: self.log_status("Ready", "info"))
     
+    def _load_interactable_data(self, obj):
+        """Show/hide interactable frame based on object type"""
+        obj_type = obj.get("object_type", "")
+        if obj_type == "chest":
+            self.interactable_frame.grid()
+        else:
+            self.interactable_frame.grid_remove()
+    
     def _on_object_type_changed(self):
         """Update property visibility when object type changes"""
         if not self.current_object:
@@ -470,6 +498,12 @@ class GameObjectEditor:
                 else:
                     self.prop_labels[key].grid_remove()
                     self.prop_widgets[key].grid_remove()
+        
+        # Show/hide interactable frame based on object type
+        if obj_type == "chest":
+            self.interactable_frame.grid()
+        else:
+            self.interactable_frame.grid_remove()
     
     def _on_property_change(self, key):
         """Handle property change - auto-save after a short delay"""
@@ -578,6 +612,7 @@ class GameObjectEditor:
                 {"name": "monster", "field_type": "Option<bool>", "optional": True, "default": "false", "show_for_types": ["character"], "label": "Monster"},
                 {"name": "healing_power", "field_type": "Option<u32>", "optional": True, "default": None, "show_for_types": ["consumable"], "label": "Healing Power"},
                 {"name": "sprites", "field_type": "Vec<SpriteCoord>", "optional": False, "default": "[]", "show_for_types": [], "label": "Sprites"},
+                {"name": "interactable", "field_type": "Option<InteractableData>", "optional": True, "default": None, "show_for_types": ["chest"], "label": "Interactable"},
                 {"name": "sprite_sheet", "field_type": "Option<String>", "optional": True, "default": None, "show_for_types": [], "label": "Sprite Sheet"},
             ]
         }
@@ -1114,6 +1149,9 @@ class GameObjectEditor:
             y = sprite.get("y", 0) if isinstance(sprite, dict) else sprite.y if hasattr(sprite, 'y') else 0
             self.sprite_listbox.insert(tk.END, f"({x}, {y})")
         
+        # Load interactable data
+        self._load_interactable_data(obj)
+        
         # Custom properties removed - all properties are now in schema
         
         # Clear loading flag - done loading object into form
@@ -1330,6 +1368,8 @@ class GameObjectEditor:
         # Store clicked coordinates for adding to sprite array
         self.last_clicked_sprite = (tile_x, tile_y)
         
+        # For all objects (including chests), use regular sprite array
+        # For chests: sprites[0] = closed, sprites[1] = open
         # Ask if user wants to add or replace
         response = messagebox.askyesnocancel(
             "Add Sprite",
@@ -1478,6 +1518,19 @@ class GameObjectEditor:
         if sprites and len(sprites) > 0:
             self.current_object.pop("sprite_x", None)
             self.current_object.pop("sprite_y", None)
+        
+        # Update interactable data - for chest objects, set interactable marker if sprites array has at least 2 sprites
+        obj_type = self.current_object.get("object_type", "")
+        if obj_type == "chest":
+            # If we have at least 2 sprites, mark as interactable
+            if len(sprites) >= 2:
+                self.current_object["interactable"] = {}  # Empty object - just a marker
+            else:
+                # Remove interactable if not enough sprites
+                self.current_object.pop("interactable", None)
+        else:
+            # Remove interactable if not a chest
+            self.current_object.pop("interactable", None)
         
         # Preserve sprite_sheet if it exists - don't remove it
         # It will be updated by the form field if changed, but won't be removed

@@ -137,9 +137,21 @@ impl GameState {
                     }
                 } else {
                     // No enemy or closed chest, try to move
-                    // But check if there's an open chest - if so, allow movement
-                    let blocked_by_closed_chest = self.chests.iter().any(|c| c.x == new_x && c.y == new_y && !c.is_open);
-                    if !blocked_by_closed_chest {
+                    // Check if there's a chest and if it's walkable in its current state
+                    let can_move = if let Some(chest) = self.chests.iter().find(|c| c.x == new_x && c.y == new_y) {
+                        // Check if chest is walkable in its current state
+                        if let Some(chest_obj) = self.object_registry.get_object(&chest.object_id) {
+                            chest_obj.get_interactable_walkable(chest.is_open)
+                        } else {
+                            // Chest object not found, default to not walkable if closed
+                            chest.is_open
+                        }
+                    } else {
+                        // No chest at this position, can move
+                        true
+                    };
+                    
+                    if can_move {
                         self.move_entity(idx, dx, dy);
                     }
                     

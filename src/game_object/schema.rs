@@ -121,7 +121,15 @@ impl GameObjectSchema {
                 optional: false,
                 default: Some("[]".to_string()),
                 show_for_types: vec![],
-                label: Some("Sprites".to_string()),
+                label: Some("Sprites (Default, or 'before' for interactables)".to_string()),
+            },
+            FieldSchema {
+                name: "interactable".to_string(),
+                field_type: "Option<InteractableData>".to_string(),
+                optional: true,
+                default: Some("None".to_string()),
+                show_for_types: vec!["chest".to_string()],
+                label: Some("Interactable (before/after states)".to_string()),
             },
             FieldSchema {
                 name: "sprite_sheet".to_string(),
