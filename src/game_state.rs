@@ -63,8 +63,10 @@ impl GameState {
         // Check if all players are dead
         let all_players_dead = self.are_all_players_dead();
         
-        // If all players are dead, don't process movement
+        // If all players are dead, automatically restart the level
         if all_players_dead {
+            self.restart_level();
+            messages.push(GameMessage::level_event("All players died! Level restarted.".to_string()));
             return (messages, level_complete, restart_confirmed);
         }
         
@@ -242,13 +244,21 @@ impl GameState {
         self.player_confirmations.clear();
         self.restart_confirmations.clear();
         
-        // Remove all entities
+        // Remove all entities, consumables, and chests
         self.entities.clear();
+        self.consumables.clear();
+        self.chests.clear();
         
-        // Generate new dungeon
-        self.dungeon = Dungeon::new_with_registry(80, 50, &self.tile_registry);
+        // Generate completely new map (dungeon, monsters, chests, consumables, stairs)
+        let (dungeon, mut new_entities, new_consumables, new_chests, stairs_pos) = 
+            MapGenerator::generate_map(&self.tile_registry, &self.object_registry);
         
-        // Find first floor tile for player spawn
+        self.dungeon = dungeon;
+        self.consumables = new_consumables;
+        self.chests = new_chests;
+        self.stairs_position = stairs_pos;
+        
+        // Find first player spawn position (from newly generated map)
         let mut player_x = 1;
         let mut player_y = 1;
         for y in 0..self.dungeon.height {
@@ -266,25 +276,66 @@ impl GameState {
         
         // Re-add all players at the spawn location
         for player_id in player_ids {
-            self.add_player(player_id);
+            // Find spawn position next to first player if exists
+            let spawn_pos = if let Some(first_player) = self.entities.iter()
+                .find(|e| e.controller == EntityController::Player) {
+                // Try to spawn adjacent to the first player
+                let adjacent_positions = [
+                    (first_player.x.wrapping_sub(1), first_player.y),
+                    (first_player.x + 1, first_player.y),
+                    (first_player.x, first_player.y.wrapping_sub(1)),
+                    (first_player.x, first_player.y + 1),
+                ];
+                
+                let mut found = false;
+                let mut spawn_x = player_x;
+                let mut spawn_y = player_y;
+                
+                for (x, y) in adjacent_positions.iter() {
+                    if *x < self.dungeon.width && *y < self.dungeon.height {
+                        if self.dungeon.tiles[*y][*x].walkable {
+                            let occupied = self.entities.iter().any(|e| e.x == *x && e.y == *y);
+                            if !occupied {
+                                spawn_x = *x;
+                                spawn_y = *y;
+                                found = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+                
+                if found {
+                    (spawn_x, spawn_y)
+                } else {
+                    (player_x, player_y)
+                }
+            } else {
+                (player_x, player_y)
+            };
+            
+            // Add player at spawn position
+            if let Some(player_template) = self.object_registry.get_object("player") {
+                use crate::entity::Entity;
+                let player_entity = Entity::new(
+                    player_id.clone(),
+                    spawn_pos.0,
+                    spawn_pos.1,
+                    "player".to_string(),
+                    player_template.attack.unwrap_or(10),
+                    player_template.defense.unwrap_or(0),
+                    player_template.attack_spread_percent.unwrap_or(20),
+                    player_template.crit_chance_percent.unwrap_or(0),
+                    player_template.crit_damage_percent.unwrap_or(150),
+                    player_template.health.unwrap_or(100),
+                    EntityController::Player,
+                );
+                self.entities.push(player_entity);
+            }
         }
         
-        // Spawn monsters
-        MapGenerator::spawn_monsters(&self.dungeon, &mut self.entities, &self.object_registry, player_x, player_y);
-        
-        // Place stairs (use first player position for stairs placement)
-        let first_player_pos = self.entities.iter()
-            .find(|e| e.controller == EntityController::Player)
-            .map(|e| (e.x, e.y))
-            .unwrap_or((player_x, player_y));
-        self.stairs_position = MapGenerator::place_stairs(&self.dungeon, first_player_pos.0, first_player_pos.1, &self.object_registry);
-        
-        // Don't spawn consumables in rooms - they only drop from monsters and chests
-        self.consumables.clear();
-        self.chests.clear();
-        
-        // Respawn chests
-        MapGenerator::spawn_chests(&self.dungeon, &self.entities, &mut self.chests, &self.object_registry, player_x, player_y, self.stairs_position);
+        // Add the monsters from the generated map
+        self.entities.extend(new_entities);
     }
     
     pub fn confirm_stairs(&mut self, player_id: &str) -> Option<GameMessage> {
@@ -427,10 +478,8 @@ impl GameState {
     }
     
     pub fn remove_player(&mut self, player_id: &str) {
-        // Remove player entity (or mark as dead)
-        if let Some(idx) = self.entities.iter().position(|e| e.id == player_id && e.controller == EntityController::Player) {
-            self.entities[idx].current_health = 0; // Mark as dead
-        }
+        // Remove player entity completely from the game
+        self.entities.retain(|e| !(e.id == player_id && e.controller == EntityController::Player));
     }
     
     fn move_entity(&mut self, entity_idx: usize, dx: i32, dy: i32) {

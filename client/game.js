@@ -9,6 +9,7 @@ let ws = null;
 let spriteSheets = {};
 let spriteSheetLoaded = false;
 let statusDiv = null;
+let myPlayerId = null;  // Store this client's own player ID
 
 // Load a sprite sheet
 function loadSpriteSheet(name) {
@@ -81,12 +82,31 @@ function render() {
         return;
     }
     
-    // Find player position for camera (find the first alive player)
+    // Find player position for camera (follow the current player this client controls)
     let playerX = 0;
     let playerY = 0;
     let playerFound = false;
     
-    if (gameState.entities) {
+    // Use our stored player ID, not the broadcast one
+    const playerIdToFollow = myPlayerId || gameState.current_player_id;
+    
+    if (gameState.entities && playerIdToFollow) {
+        // Find the current player entity (the one this client controls)
+        const currentPlayer = gameState.entities.find(
+            e => e.id === playerIdToFollow && 
+                 e.controller === 'Player' && 
+                 e.current_health > 0
+        );
+        
+        if (currentPlayer) {
+            playerX = currentPlayer.x;
+            playerY = currentPlayer.y;
+            playerFound = true;
+        }
+    }
+    
+    // Fallback: if current player not found, find any alive player
+    if (!playerFound && gameState.entities) {
         for (const entity of gameState.entities) {
             if (entity.controller === 'Player' && entity.current_health > 0) {
                 playerX = entity.x;
@@ -490,14 +510,55 @@ function render() {
     }
 }
 
+// Update player list
+function updatePlayerList() {
+    const playerListDiv = document.getElementById('playerList');
+    if (!playerListDiv || !gameState || !gameState.players) {
+        return;
+    }
+    
+    // Use our stored player ID, not the broadcast one
+    const currentPlayerId = myPlayerId || gameState.current_player_id;
+    
+    if (gameState.players.length === 0) {
+        playerListDiv.innerHTML = '<div style="color: #888;">No players</div>';
+        return;
+    }
+    
+    let html = '';
+    for (const player of gameState.players) {
+        const isCurrentPlayer = currentPlayerId && player.id === currentPlayerId;
+        const color = isCurrentPlayer ? '#00ff00' : (player.is_alive ? '#fff' : '#888');
+        const style = isCurrentPlayer ? 'font-weight: bold;' : '';
+        const status = player.is_alive ? '●' : '✕';
+        html += `<div style="color: ${color}; ${style}">${status} ${player.name}</div>`;
+    }
+    
+    playerListDiv.innerHTML = html;
+}
+
 // Update health bar
 function updateHealthBar() {
     if (!gameState || !gameState.entities) {
         return;
     }
     
-    // Find the player entity
-    const player = gameState.entities.find(e => e.controller === 'Player' && e.current_health > 0);
+    // Find the current player entity (the one this client controls)
+    // Use our stored player ID, not the broadcast one
+    const playerIdToFind = myPlayerId || gameState.current_player_id;
+    let player = null;
+    if (playerIdToFind) {
+        player = gameState.entities.find(
+            e => e.id === playerIdToFind && 
+                 e.controller === 'Player' && 
+                 e.current_health > 0
+        );
+    }
+    
+    // Fallback: if current player not found, find any alive player
+    if (!player) {
+        player = gameState.entities.find(e => e.controller === 'Player' && e.current_health > 0);
+    }
     
     if (!player) {
         // Player is dead or not found
@@ -560,8 +621,16 @@ function updateHealthBar() {
 async function handleGameStateUpdate(newGameState) {
     gameState = newGameState;
     
+    // Store our player ID from the first update (if not already stored)
+    if (!myPlayerId && gameState.current_player_id) {
+        myPlayerId = gameState.current_player_id;
+    }
+    
     // Update health bar
     updateHealthBar();
+    
+    // Update player list
+    updatePlayerList();
     
     // Process all messages from server (combat, level events, system)
     if (gameState.messages && gameState.messages.length > 0) {
@@ -584,21 +653,7 @@ async function handleGameStateUpdate(newGameState) {
         return;
     }
     
-    // Check if all players are dead
-    if (gameState.all_players_dead && !window.restartConfirmationShown) {
-        window.restartConfirmationShown = true;
-        const confirmed = confirm('All players are dead! Do you want to restart?');
-        if (confirmed) {
-            // Send restart confirmation to server
-            if (ws && ws.readyState === WebSocket.OPEN) {
-                ws.send(JSON.stringify({ action: 'move_up', confirm_restart: true }));
-            }
-        } else {
-            window.restartConfirmationShown = false;
-        }
-    } else if (!gameState.all_players_dead) {
-        window.restartConfirmationShown = false;
-    }
+    // All players dead - level will auto-restart (no confirmation needed)
     
     // Check if player is on stairs and show confirmation dialog
     if (gameState.on_stairs && !window.stairsConfirmationShown) {

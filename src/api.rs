@@ -61,11 +61,20 @@ pub struct ChestData {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct PlayerData {
+    pub id: String,
+    pub name: String,  // Display name (from GameObject or player_id)
+    pub is_alive: bool,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct GameUpdate {
     pub map: Vec<Vec<crate::tile::Tile>>,
     pub entities: Vec<EntityData>,  // All entities (player + AI)
     pub consumables: Vec<ConsumableData>,  // All consumables on the map
     pub chests: Vec<ChestData>,  // All chests on the map
+    pub players: Vec<PlayerData>,  // List of all players
+    pub current_player_id: Option<String>,  // ID of the current player (for highlighting)
     pub width: usize,
     pub height: usize,
     pub messages: Vec<GameMessage>,  // Game messages (combat, level events, system)
@@ -195,11 +204,30 @@ pub fn game_state_to_update(
         false
     };
     
+    // Build players list
+    let players: Vec<PlayerData> = game.entities.iter()
+        .filter(|e| e.controller == EntityController::Player)
+        .map(|entity| {
+            // Get display name from GameObject, or use entity ID
+            let name = game.object_registry.get_object(&entity.object_id)
+                .map(|obj| obj.name.clone())
+                .unwrap_or_else(|| entity.id.clone());
+            
+            PlayerData {
+                id: entity.id.clone(),
+                name,
+                is_alive: entity.is_alive(),
+            }
+        })
+        .collect();
+    
     GameUpdate {
         map: game.dungeon.tiles.clone(),
         entities,
         consumables,
         chests,
+        players,
+        current_player_id: player_id.map(|s| s.to_string()),
         width: game.dungeon.width,
         height: game.dungeon.height,
         messages: Vec::new(),
