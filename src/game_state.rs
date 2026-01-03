@@ -1,0 +1,470 @@
+use crate::dungeon::Dungeon;
+use crate::tile_registry::TileRegistry;
+use crate::game_object::GameObjectRegistry;
+use crate::entity::{Entity, EntityController};
+use crate::consumable::Consumable;
+use crate::chest::Chest;
+use crate::message::{GameMessage, PlayerCommand};
+use crate::map_generator::MapGenerator;
+use crate::combat::attack_entity;
+use crate::ai::process_ai_turns;
+
+pub struct GameState {
+    pub dungeon: Dungeon,
+    pub entities: Vec<Entity>,  // All entities (player + AI)
+    pub consumables: Vec<Consumable>,  // All consumables on the map
+    pub chests: Vec<Chest>,  // All chests on the map
+    pub tile_registry: TileRegistry,
+    pub object_registry: GameObjectRegistry,
+    pub stairs_position: Option<(usize, usize)>,  // Position of stairs (goal tile)
+    pub player_confirmations: std::collections::HashSet<String>,  // Players who confirmed they want to end level
+    pub restart_confirmations: std::collections::HashSet<String>,  // Players who confirmed they want to restart after death
+}
+
+impl GameState {
+    pub fn new_with_registry(tile_registry: TileRegistry, object_registry: GameObjectRegistry) -> Self {
+        let (dungeon, entities, consumables, chests, stairs_pos) = 
+            MapGenerator::generate_map(&tile_registry, &object_registry);
+        
+        Self {
+            dungeon,
+            entities,
+            consumables,
+            chests,
+            tile_registry,
+            object_registry,
+            stairs_position: stairs_pos,
+            player_confirmations: std::collections::HashSet::new(),
+            restart_confirmations: std::collections::HashSet::new(),
+        }
+    }
+
+    pub fn handle_command(&mut self, cmd: &PlayerCommand, player_id: &str) -> (Vec<GameMessage>, bool, bool) {
+        let mut messages = Vec::new();
+        let mut level_complete = false;
+        let mut restart_confirmed = false;
+        
+        // Handle restart confirmation if present
+        if let Some(true) = cmd.confirm_restart {
+            if let Some(msg) = self.confirm_restart(player_id) {
+                messages.push(msg);
+                restart_confirmed = true;
+            }
+        }
+        
+        // Handle stairs confirmation if present
+        if let Some(true) = cmd.confirm_stairs {
+            if let Some(msg) = self.confirm_stairs(player_id) {
+                messages.push(msg);
+                level_complete = true;
+            }
+        }
+        
+        // Check if all players are dead
+        let all_players_dead = self.are_all_players_dead();
+        
+        // If all players are dead, don't process movement
+        if all_players_dead {
+            return (messages, level_complete, restart_confirmed);
+        }
+        
+        // Find the specific player entity by ID
+        let player_idx = self.entities.iter().position(|e| e.id == player_id && e.controller == EntityController::Player);
+        
+        if let Some(idx) = player_idx {
+            let (dx, dy) = match cmd.action.as_str() {
+                "move_up" => (0, -1),
+                "move_down" => (0, 1),
+                "move_left" => (-1, 0),
+                "move_right" => (1, 0),
+                _ => {
+                    // Still process AI even if player action is invalid
+                    messages.extend(process_ai_turns(&mut self.entities, &self.dungeon, &self.object_registry, &mut self.consumables));
+                    return (messages, level_complete, restart_confirmed);
+                },
+            };
+            
+            // Check if there's an enemy at the target position
+            let entity = &self.entities[idx];
+            let new_x = (entity.x as i32 + dx) as usize;
+            let new_y = (entity.y as i32 + dy) as usize;
+            
+            // Check bounds
+            if new_x < self.dungeon.width && new_y < self.dungeon.height {
+                // Check if there's a closed chest at target position (highest priority)
+                if let Some(chest_idx) = self.chests.iter().position(|c| c.x == new_x && c.y == new_y && !c.is_open) {
+                    // Open chest instead of moving
+                    let chest = &mut self.chests[chest_idx];
+                    chest.is_open = true;
+                    
+                    // Spawn a potion at the chest location
+                    let potion_templates: Vec<&crate::game_object::GameObject> = self.object_registry.get_all_objects()
+                        .into_iter()
+                        .filter(|obj| obj.object_type == "consumable")
+                        .collect();
+                    
+                    if !potion_templates.is_empty() {
+                        use rand::Rng;
+                        let mut rng = rand::thread_rng();
+                        let potion_template = potion_templates[rng.gen_range(0..potion_templates.len())];
+                        
+                        use std::sync::atomic::{AtomicU64, Ordering};
+                        static CONSUMABLE_COUNTER: AtomicU64 = AtomicU64::new(0);
+                        let consumable_id = format!("consumable_{}", CONSUMABLE_COUNTER.fetch_add(1, Ordering::Relaxed));
+                        
+                        let consumable = Consumable {
+                            id: consumable_id,
+                            x: new_x,
+                            y: new_y,
+                            object_id: potion_template.id.clone(),
+                        };
+                        
+                        self.consumables.push(consumable);
+                        messages.push(GameMessage::level_event("Chest opened!".to_string()));
+                    }
+                }
+                // Check if there's an enemy (AI-controlled entity) at target position
+                else if let Some(target_idx) = self.entities.iter().position(|e| {
+                    e.id != entity.id && 
+                    e.x == new_x && 
+                    e.y == new_y && 
+                    e.is_alive() &&
+                    e.controller == EntityController::AI
+                }) {
+                    // Attack instead of moving
+                    if let Some(msg) = attack_entity(&mut self.entities, idx, target_idx, &self.object_registry, &mut self.consumables) {
+                        messages.push(msg);
+                    }
+                } else {
+                    // No enemy or closed chest, try to move
+                    // But check if there's an open chest - if so, allow movement
+                    let blocked_by_closed_chest = self.chests.iter().any(|c| c.x == new_x && c.y == new_y && !c.is_open);
+                    if !blocked_by_closed_chest {
+                        self.move_entity(idx, dx, dy);
+                    }
+                    
+                    // Check if player stepped on a consumable
+                    let new_x = self.entities[idx].x;
+                    let new_y = self.entities[idx].y;
+                    if let Some(consumable_idx) = self.consumables.iter().position(|c| c.x == new_x && c.y == new_y) {
+                        // Player stepped on a consumable - consume it
+                        let consumable = &self.consumables[consumable_idx];
+                        if let Some(consumable_obj) = self.object_registry.get_object(&consumable.object_id) {
+                            if let Some(healing_power) = consumable_obj.healing_power {
+                                // Heal the player
+                                let old_health = self.entities[idx].current_health;
+                                self.entities[idx].heal(healing_power);
+                                let new_health = self.entities[idx].current_health;
+                                let healed_amount = new_health - old_health;
+                                
+                                // Create a healing message
+                                messages.push(GameMessage::healing(
+                                    consumable_obj.name.clone(),
+                                    self.entities[idx].id.clone(),
+                                    healed_amount,
+                                    new_health,
+                                ));
+                                
+                                // Remove the consumable
+                                self.consumables.remove(consumable_idx);
+                            }
+                        }
+                    }
+                    
+                    // Check if player stepped on stairs
+                    if let Some((stairs_x, stairs_y)) = self.stairs_position {
+                        if new_x == stairs_x && new_y == stairs_y {
+                            // Player stepped on stairs - they need to confirm
+                            // This will be handled by the client showing a confirmation dialog
+                            // For now, we just note that the player is on stairs
+                        }
+                    }
+                }
+            }
+        }
+        
+        // After player turn, process all AI turns (only if level not complete and not all players dead)
+        if !level_complete && !self.are_all_players_dead() {
+            messages.extend(process_ai_turns(&mut self.entities, &self.dungeon, &self.object_registry, &mut self.consumables));
+        }
+        
+        (messages, level_complete, restart_confirmed)
+    }
+    
+    pub fn are_all_players_dead(&self) -> bool {
+        let alive_players = self.entities.iter()
+            .filter(|e| e.controller == EntityController::Player && e.is_alive())
+            .count();
+        alive_players == 0 && self.entities.iter().any(|e| e.controller == EntityController::Player)
+    }
+    
+    pub fn confirm_restart(&mut self, player_id: &str) -> Option<GameMessage> {
+        // Add player to restart confirmations
+        self.restart_confirmations.insert(player_id.to_string());
+        
+        // Check if all players have confirmed
+        let all_players: Vec<String> = self.entities.iter()
+            .filter(|e| e.controller == EntityController::Player)
+            .map(|e| e.id.clone())
+            .collect();
+        
+        let all_confirmed = !all_players.is_empty() && all_players.iter().all(|pid| self.restart_confirmations.contains(pid));
+        
+        if all_confirmed {
+            // Reset the game state
+            self.restart_level();
+            return Some(GameMessage::level_event("Level restarted!".to_string()));
+        }
+        
+        None
+    }
+    
+    pub fn restart_level(&mut self) {
+        // Save player IDs before clearing entities
+        let player_ids: Vec<String> = self.entities.iter()
+            .filter(|e| e.controller == EntityController::Player)
+            .map(|e| e.id.clone())
+            .collect();
+        
+        // Clear confirmations
+        self.player_confirmations.clear();
+        self.restart_confirmations.clear();
+        
+        // Remove all entities
+        self.entities.clear();
+        
+        // Generate new dungeon
+        self.dungeon = Dungeon::new_with_registry(80, 50, &self.tile_registry);
+        
+        // Find first floor tile for player spawn
+        let mut player_x = 1;
+        let mut player_y = 1;
+        for y in 0..self.dungeon.height {
+            for x in 0..self.dungeon.width {
+                if self.dungeon.tiles[y][x].walkable {
+                    player_x = x;
+                    player_y = y;
+                    break;
+                }
+            }
+            if self.dungeon.tiles[player_y][player_x].walkable {
+                break;
+            }
+        }
+        
+        // Re-add all players at the spawn location
+        for player_id in player_ids {
+            self.add_player(player_id);
+        }
+        
+        // Spawn monsters
+        MapGenerator::spawn_monsters(&self.dungeon, &mut self.entities, &self.object_registry, player_x, player_y);
+        
+        // Place stairs (use first player position for stairs placement)
+        let first_player_pos = self.entities.iter()
+            .find(|e| e.controller == EntityController::Player)
+            .map(|e| (e.x, e.y))
+            .unwrap_or((player_x, player_y));
+        self.stairs_position = MapGenerator::place_stairs(&self.dungeon, first_player_pos.0, first_player_pos.1, &self.object_registry);
+        
+        // Don't spawn consumables in rooms - they only drop from monsters and chests
+        self.consumables.clear();
+        self.chests.clear();
+        
+        // Respawn chests
+        MapGenerator::spawn_chests(&self.dungeon, &self.entities, &mut self.chests, &self.object_registry, player_x, player_y, self.stairs_position);
+    }
+    
+    pub fn confirm_stairs(&mut self, player_id: &str) -> Option<GameMessage> {
+        // Add player to confirmations
+        self.player_confirmations.insert(player_id.to_string());
+        
+        // Check if all players have confirmed
+        let all_players: Vec<String> = self.entities.iter()
+            .filter(|e| e.controller == EntityController::Player && e.is_alive())
+            .map(|e| e.id.clone())
+            .collect();
+        
+        let all_confirmed = all_players.iter().all(|pid| self.player_confirmations.contains(pid));
+        
+        if all_confirmed {
+            return Some(GameMessage::level_event("Level complete! All players confirmed. Preparing next level...".to_string()));
+        }
+        
+        None
+    }
+    
+    pub fn add_player(&mut self, player_id: String) -> Option<usize> {
+        // Get player object template from registry - must have id "player"
+        let player_obj = self.object_registry.get_object("player");
+        
+        if let Some(player_template) = player_obj {
+            // Find spawn position: next to first player if exists, otherwise first walkable tile
+            let mut spawn_x = 1;
+            let mut spawn_y = 1;
+            let mut found = false;
+            
+            // First, try to find an existing player to spawn next to
+            if let Some(first_player) = self.entities.iter().find(|e| e.controller == EntityController::Player && e.is_alive()) {
+                // Try to spawn adjacent to the first player
+                let adjacent_positions = [
+                    (first_player.x.wrapping_sub(1), first_player.y),     // Left
+                    (first_player.x + 1, first_player.y),                // Right
+                    (first_player.x, first_player.y.wrapping_sub(1)),    // Up
+                    (first_player.x, first_player.y + 1),                // Down
+                ];
+                
+                for (x, y) in adjacent_positions.iter() {
+                    if *x < self.dungeon.width && *y < self.dungeon.height {
+                        if self.dungeon.tiles[*y][*x].walkable {
+                            // Check if position is occupied
+                            let occupied = self.entities.iter().any(|e: &Entity| e.x == *x && e.y == *y && e.is_alive());
+                            if !occupied {
+                                spawn_x = *x;
+                                spawn_y = *y;
+                                found = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+            
+            // If we didn't find a spot next to first player, find first available walkable tile
+            if !found {
+                for y in 0..self.dungeon.height {
+                    for x in 0..self.dungeon.width {
+                        if self.dungeon.tiles[y][x].walkable {
+                            // Check if position is occupied
+                            let occupied = self.entities.iter().any(|e: &Entity| e.x == x && e.y == y && e.is_alive());
+                            if !occupied {
+                                spawn_x = x;
+                                spawn_y = y;
+                                found = true;
+                                break;
+                            }
+                        }
+                    }
+                    if found {
+                        break;
+                    }
+                }
+            }
+            
+            let max_health = player_template.health.unwrap_or(100);
+            let attack = player_template.attack
+                .or_else(|| {
+                    player_template.properties
+                        .get("attack")
+                        .and_then(|s| s.parse::<i32>().ok())
+                })
+                .unwrap_or(10);
+            
+            let defense = player_template.defense
+                .or_else(|| {
+                    player_template.properties
+                        .get("defense")
+                        .and_then(|s| s.parse::<i32>().ok())
+                })
+                .unwrap_or(0);
+            
+            let attack_spread = player_template.attack_spread_percent
+                .or_else(|| {
+                    player_template.properties
+                        .get("attack_spread_percent")
+                        .and_then(|s| s.parse::<u32>().ok())
+                })
+                .unwrap_or(20);
+            
+            let crit_chance = player_template.crit_chance_percent
+                .or_else(|| {
+                    player_template.properties
+                        .get("crit_chance_percent")
+                        .and_then(|s| s.parse::<u32>().ok())
+                })
+                .unwrap_or(0);
+            
+            let crit_damage = player_template.crit_damage_percent
+                .or_else(|| {
+                    player_template.properties
+                        .get("crit_damage_percent")
+                        .and_then(|s| s.parse::<u32>().ok())
+                })
+                .unwrap_or(150);  // Default 150% crit damage
+            
+            let player = Entity::new(
+                player_id,
+                spawn_x,
+                spawn_y,
+                player_template.id.clone(),
+                attack,
+                defense,
+                attack_spread,
+                crit_chance,
+                crit_damage,
+                max_health,
+                EntityController::Player,
+            );
+            
+            let idx = self.entities.len();
+            self.entities.push(player);
+            Some(idx)
+        } else {
+            None
+        }
+    }
+    
+    pub fn remove_player(&mut self, player_id: &str) {
+        // Remove player entity (or mark as dead)
+        if let Some(idx) = self.entities.iter().position(|e| e.id == player_id && e.controller == EntityController::Player) {
+            self.entities[idx].current_health = 0; // Mark as dead
+        }
+    }
+    
+    fn move_entity(&mut self, entity_idx: usize, dx: i32, dy: i32) {
+        if entity_idx >= self.entities.len() {
+            return;
+        }
+        
+        // Update facing direction based on horizontal movement
+        if dx > 0 {
+            // Moving right
+            self.entities[entity_idx].facing_right = true;
+        } else if dx < 0 {
+            // Moving left
+            self.entities[entity_idx].facing_right = false;
+        }
+        // If dx == 0, keep current facing direction
+        
+        let entity = &self.entities[entity_idx];
+        let new_x = entity.x as i32 + dx;
+        let new_y = entity.y as i32 + dy;
+        
+        if new_x >= 0 && new_y >= 0 {
+            let new_x = new_x as usize;
+            let new_y = new_y as usize;
+            
+            // Check bounds
+            if new_x >= self.dungeon.width || new_y >= self.dungeon.height {
+                return;
+            }
+            
+            // Check if tile is walkable
+            if !self.dungeon.is_walkable(new_x, new_y) {
+                return;
+            }
+            
+            // Check if another entity is at that position (but allow attacking enemies)
+            let entity_id = self.entities[entity_idx].id.clone();
+            let occupied = self.entities.iter().any(|e| e.id != entity_id && e.x == new_x && e.y == new_y && e.is_alive());
+            if occupied {
+                return;
+            }
+            
+            // Move the entity
+            self.entities[entity_idx].x = new_x;
+            self.entities[entity_idx].y = new_y;
+        }
+    }
+}
+

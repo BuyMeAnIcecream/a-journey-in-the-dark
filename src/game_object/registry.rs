@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use crate::game_object::GameObject;
+use crate::game_object::object::GameObject;
 
 pub struct GameObjectRegistry {
     objects: HashMap<String, GameObject>,
