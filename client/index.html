@@ -185,6 +185,27 @@
                     return;
                 }
                 
+                // Check if restart was confirmed (level was restarted)
+                if (gameState.restart_confirmed) {
+                    addConsoleMessage('Level restarted!', 'success');
+                    window.restartConfirmationShown = false;
+                    return;
+                }
+                
+                // Check if all players are dead
+                if (gameState.all_players_dead && !window.restartConfirmationShown) {
+                    window.restartConfirmationShown = true;
+                    const confirmed = confirm('All players are dead! Do you want to restart?');
+                    if (confirmed) {
+                        // Send restart confirmation to server
+                        ws.send(JSON.stringify({ action: 'move_up', confirm_restart: true }));
+                    } else {
+                        window.restartConfirmationShown = false;
+                    }
+                } else if (!gameState.all_players_dead) {
+                    window.restartConfirmationShown = false;
+                }
+                
                 // Check if player is on stairs and show confirmation dialog
                 if (gameState.on_stairs && !window.stairsConfirmationShown) {
                     window.stairsConfirmationShown = true;
@@ -525,6 +546,22 @@
             
             if (gameState.stairs_position && !Array.isArray(gameState.stairs_position)) {
                 console.warn('stairs_position is not in expected format:', gameState.stairs_position);
+            }
+            
+            // Draw death overlay if all players are dead
+            if (gameState.all_players_dead) {
+                ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                
+                ctx.fillStyle = '#ff0000';
+                ctx.font = 'bold 32px Arial';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText('YOU DIED', canvas.width / 2, canvas.height / 2 - 20);
+                
+                ctx.fillStyle = '#ffffff';
+                ctx.font = '20px Arial';
+                ctx.fillText('Waiting for all players to confirm restart...', canvas.width / 2, canvas.height / 2 + 20);
             }
         }
         

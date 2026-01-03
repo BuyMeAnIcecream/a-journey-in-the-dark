@@ -49,6 +49,8 @@ struct GameUpdate {
     stairs_position: Option<(usize, usize)>,  // Position of stairs (goal)
     on_stairs: bool,  // Whether the current player is on stairs
     level_complete: bool,  // Whether level is complete (all players confirmed)
+    all_players_dead: bool,  // Whether all players are dead
+    restart_confirmed: bool,  // Whether all players confirmed restart
 }
 
 #[tokio::main]
@@ -169,6 +171,8 @@ async fn generate_map_endpoint() -> Json<GameUpdate> {
         stairs_position: game_state.stairs_position,
         on_stairs,
         level_complete: false,
+        all_players_dead: false,
+        restart_confirmed: false,
     })
 }
 
@@ -229,6 +233,7 @@ async fn handle_socket(socket: WebSocket, state: SharedState, tx: Tx) {
         let on_stairs = game.stairs_position.map_or(false, |(sx, sy)| {
             game.entities.iter().any(|e| e.id == player_id && e.x == sx && e.y == sy)
         });
+        let all_players_dead = game.are_all_players_dead();
         let update = GameUpdate {
             map: game.dungeon.tiles.clone(),
             entities,
@@ -238,6 +243,8 @@ async fn handle_socket(socket: WebSocket, state: SharedState, tx: Tx) {
             stairs_position: game.stairs_position,
             on_stairs,
             level_complete: false,
+            all_players_dead,
+            restart_confirmed: false,
         };
         serde_json::to_string(&update).unwrap()
     };
@@ -264,7 +271,7 @@ async fn handle_socket(socket: WebSocket, state: SharedState, tx: Tx) {
         while let Some(Ok(Message::Text(text))) = receiver.next().await {
             if let Ok(cmd) = serde_json::from_str::<PlayerCommand>(&text) {
                 let mut game = state_for_recv.lock().unwrap();
-                let (combat_messages, level_complete) = game.handle_command(&cmd, &player_id_clone);
+                let (combat_messages, level_complete, restart_confirmed) = game.handle_command(&cmd, &player_id_clone);
                 
                 // Broadcast update
                 // Convert entities to EntityData
@@ -295,6 +302,7 @@ async fn handle_socket(socket: WebSocket, state: SharedState, tx: Tx) {
                     .collect();
                 
                 let messages = combat_messages;
+                let all_players_dead = game.are_all_players_dead();
                 
                 // Check if current player is on stairs
                 let on_stairs = game.stairs_position.map_or(false, |(sx, sy)| {
@@ -310,6 +318,8 @@ async fn handle_socket(socket: WebSocket, state: SharedState, tx: Tx) {
                     stairs_position: game.stairs_position,
                     on_stairs,
                     level_complete,
+                    all_players_dead,
+                    restart_confirmed,
                 }).unwrap();
                 let _ = tx.send(update);
             }

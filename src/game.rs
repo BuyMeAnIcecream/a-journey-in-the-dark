@@ -17,6 +17,8 @@ pub struct PlayerCommand {
     pub action: String,
     #[serde(default)]
     pub confirm_stairs: Option<bool>,  // Optional confirmation for stairs
+    #[serde(default)]
+    pub confirm_restart: Option<bool>,  // Optional confirmation for restart after death
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -88,6 +90,7 @@ pub struct GameState {
     pub object_registry: GameObjectRegistry,
     pub stairs_position: Option<(usize, usize)>,  // Position of stairs (goal tile)
     pub player_confirmations: std::collections::HashSet<String>,  // Players who confirmed they want to end level
+    pub restart_confirmations: std::collections::HashSet<String>,  // Players who confirmed they want to restart after death
 }
 
 impl GameState {
@@ -189,6 +192,7 @@ impl GameState {
             object_registry,
             stairs_position: stairs_pos,
             player_confirmations: std::collections::HashSet::new(),
+            restart_confirmations: std::collections::HashSet::new(),
         }
     }
     
@@ -267,13 +271,27 @@ impl GameState {
         self.entities.iter_mut().find(|e| e.controller == EntityController::Player)
     }
 
-    pub fn handle_command(&mut self, cmd: &PlayerCommand, player_id: &str) -> (Vec<CombatMessage>, bool) {
+    pub fn handle_command(&mut self, cmd: &PlayerCommand, player_id: &str) -> (Vec<CombatMessage>, bool, bool) {
         let mut messages = Vec::new();
         let mut level_complete = false;
+        let mut restart_confirmed = false;
+        
+        // Handle restart confirmation if present
+        if let Some(true) = cmd.confirm_restart {
+            restart_confirmed = self.confirm_restart(player_id);
+        }
         
         // Handle stairs confirmation if present
         if let Some(true) = cmd.confirm_stairs {
             level_complete = self.confirm_stairs(player_id);
+        }
+        
+        // Check if all players are dead
+        let all_players_dead = self.are_all_players_dead();
+        
+        // If all players are dead, don't process movement
+        if all_players_dead {
+            return (messages, level_complete, restart_confirmed);
         }
         
         // Find the specific player entity by ID
@@ -288,7 +306,7 @@ impl GameState {
                 _ => {
                     // Still process AI even if player action is invalid
                     messages.extend(self.process_ai_turns());
-                    return (messages, false);
+                    return (messages, level_complete, restart_confirmed);
                 },
             };
             
@@ -329,12 +347,131 @@ impl GameState {
             }
         }
         
-        // After player turn, process all AI turns (only if level not complete)
-        if !level_complete {
+        // After player turn, process all AI turns (only if level not complete and not all players dead)
+        if !level_complete && !self.are_all_players_dead() {
             messages.extend(self.process_ai_turns());
         }
         
-        (messages, level_complete)
+        (messages, level_complete, restart_confirmed)
+    }
+    
+    pub fn are_all_players_dead(&self) -> bool {
+        let alive_players = self.entities.iter()
+            .filter(|e| e.controller == EntityController::Player && e.is_alive())
+            .count();
+        alive_players == 0 && self.entities.iter().any(|e| e.controller == EntityController::Player)
+    }
+    
+    pub fn confirm_restart(&mut self, player_id: &str) -> bool {
+        // Add player to restart confirmations
+        self.restart_confirmations.insert(player_id.to_string());
+        
+        // Check if all players have confirmed
+        let all_players: Vec<String> = self.entities.iter()
+            .filter(|e| e.controller == EntityController::Player)
+            .map(|e| e.id.clone())
+            .collect();
+        
+        let all_confirmed = !all_players.is_empty() && all_players.iter().all(|pid| self.restart_confirmations.contains(pid));
+        
+        if all_confirmed {
+            // Reset the game state
+            self.restart_level();
+            return true;
+        }
+        
+        false
+    }
+    
+    pub fn restart_level(&mut self) {
+        // Save player IDs before clearing entities
+        let player_ids: Vec<String> = self.entities.iter()
+            .filter(|e| e.controller == EntityController::Player)
+            .map(|e| e.id.clone())
+            .collect();
+        
+        // Clear confirmations
+        self.player_confirmations.clear();
+        self.restart_confirmations.clear();
+        
+        // Remove all entities
+        self.entities.clear();
+        
+        // Generate new dungeon
+        self.dungeon = Dungeon::new_with_registry(80, 50, &self.tile_registry);
+        
+        // Find first floor tile for player spawn
+        let mut player_x = 1;
+        let mut player_y = 1;
+        for y in 0..self.dungeon.height {
+            for x in 0..self.dungeon.width {
+                if self.dungeon.tiles[y][x].walkable {
+                    player_x = x;
+                    player_y = y;
+                    break;
+                }
+            }
+            if self.dungeon.tiles[player_y][player_x].walkable {
+                break;
+            }
+        }
+        
+        // Re-add all players at the spawn location
+        for player_id in player_ids {
+            self.add_player(player_id);
+        }
+        
+        // Spawn monsters in each room
+        let monster_templates = self.object_registry.get_monster_characters();
+        if !monster_templates.is_empty() {
+            use rand::Rng;
+            let mut rng = rand::thread_rng();
+            let mut monster_id_counter = 0;
+            
+            for room in &self.dungeon.rooms {
+                let mut valid_positions = Vec::new();
+                for dy in 0..room.height {
+                    for dx in 0..room.width {
+                        let x = room.x + dx;
+                        let y = room.y + dy;
+                        if x < self.dungeon.width && y < self.dungeon.height {
+                            if self.dungeon.tiles[y][x].walkable {
+                                if !(x == player_x && y == player_y) {
+                                    let occupied = self.entities.iter().any(|e: &Entity| e.x == x && e.y == y && e.is_alive());
+                                    if !occupied {
+                                        valid_positions.push((x, y));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                if !valid_positions.is_empty() {
+                    let (monster_x, monster_y) = valid_positions[rng.gen_range(0..valid_positions.len())];
+                    let monster_template = &monster_templates[rng.gen_range(0..monster_templates.len())];
+                    
+                    let monster = Entity::new(
+                        format!("monster_{}", monster_id_counter),
+                        monster_x,
+                        monster_y,
+                        monster_template.id.clone(),
+                        monster_template.attack.unwrap_or(5) as i32,
+                        monster_template.health.unwrap_or(20),
+                        EntityController::AI,
+                    );
+                    self.entities.push(monster);
+                    monster_id_counter += 1;
+                }
+            }
+        }
+        
+        // Place stairs (use first player position for stairs placement)
+        let first_player_pos = self.entities.iter()
+            .find(|e| e.controller == EntityController::Player)
+            .map(|e| (e.x, e.y))
+            .unwrap_or((player_x, player_y));
+        self.stairs_position = Self::place_stairs(&self.dungeon, first_player_pos.0, first_player_pos.1, &self.object_registry);
     }
     
     pub fn confirm_stairs(&mut self, player_id: &str) -> bool {
