@@ -147,6 +147,16 @@ pub struct Consumable {
     pub object_id: String,  // Reference to GameObject
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Chest {
+    pub id: String,  // Unique chest ID
+    pub x: usize,
+    pub y: usize,
+    pub object_id: String,  // Reference to GameObject (for closed sprite)
+    pub open_object_id: Option<String>,  // Reference to GameObject for open sprite (if different)
+    pub is_open: bool,  // Whether the chest is open
+}
+
 impl Entity {
     pub fn new(
         id: String,
@@ -191,6 +201,7 @@ pub struct GameState {
     pub dungeon: Dungeon,
     pub entities: Vec<Entity>,  // All entities (player + AI)
     pub consumables: Vec<Consumable>,  // All consumables on the map
+    pub chests: Vec<Chest>,  // All chests on the map
     pub tile_registry: TileRegistry,
     pub object_registry: GameObjectRegistry,
     pub stairs_position: Option<(usize, usize)>,  // Position of stairs (goal tile)
@@ -326,22 +337,24 @@ impl GameState {
         } else {
         }
         
-        // Spawn consumables
-        let mut consumables = Vec::new();
-        let consumable_templates: Vec<&crate::game_object::GameObject> = object_registry.get_all_objects()
+        // Don't spawn consumables in rooms - they only drop from monsters and chests
+        let consumables = Vec::new();
+        
+        // Spawn chests (1 per room, randomly)
+        let mut chests = Vec::new();
+        let chest_templates: Vec<&crate::game_object::GameObject> = object_registry.get_all_objects()
             .into_iter()
-            .filter(|obj| obj.object_type == "consumable")
+            .filter(|obj| obj.object_type == "chest")
             .collect();
         
-        if !consumable_templates.is_empty() {
+        if !chest_templates.is_empty() {
             use rand::Rng;
             let mut rng = rand::thread_rng();
-            let mut consumable_id_counter = 0;
+            let mut chest_id_counter = 0;
             
-            // Spawn 1-2 consumables per room
+            // Spawn 1 chest per room (50% chance)
             for room in &dungeon.rooms {
-                let num_consumables = rng.gen_range(1..=2);
-                for _ in 0..num_consumables {
+                if rng.gen_bool(0.5) {  // 50% chance to spawn a chest in this room
                     // Find a random walkable position within the room
                     let mut valid_positions = Vec::new();
                     for dy in 0..room.height {
@@ -350,15 +363,13 @@ impl GameState {
                             let y = room.y + dy;
                             if x < dungeon.width && y < dungeon.height {
                                 if dungeon.tiles[y][x].walkable {
-                                    // Check if position is not occupied by player
+                                    // Check if position is not occupied
                                     if !(x == player_x && y == player_y) {
-                                        // Check if position is not occupied by another entity
                                         let occupied_by_entity = entities.iter().any(|e| e.x == x && e.y == y);
-                                        // Check if position is not occupied by stairs
                                         let occupied_by_stairs = stairs_pos.map_or(false, |(sx, sy)| sx == x && sy == y);
-                                        // Check if position is not already occupied by a consumable
                                         let occupied_by_consumable = consumables.iter().any(|c: &Consumable| c.x == x && c.y == y);
-                                        if !occupied_by_entity && !occupied_by_stairs && !occupied_by_consumable {
+                                        let occupied_by_chest = chests.iter().any(|c: &Chest| c.x == x && c.y == y);
+                                        if !occupied_by_entity && !occupied_by_stairs && !occupied_by_consumable && !occupied_by_chest {
                                             valid_positions.push((x, y));
                                         }
                                     }
@@ -367,22 +378,32 @@ impl GameState {
                         }
                     }
                     
-                    // Spawn consumable if we have valid positions
+                    // Spawn chest if we have valid positions
                     if !valid_positions.is_empty() {
                         let pos_idx = rng.gen_range(0..valid_positions.len());
-                        let (consumable_x, consumable_y) = valid_positions[pos_idx];
+                        let (chest_x, chest_y) = valid_positions[pos_idx];
                         
-                        // Select a random consumable template
-                        let consumable_template = consumable_templates[rng.gen_range(0..consumable_templates.len())];
+                        // Select first chest template (or random if multiple)
+                        let chest_template = chest_templates[rng.gen_range(0..chest_templates.len())];
                         
-                        let consumable = Consumable {
-                            id: format!("consumable_{}", consumable_id_counter),
-                            x: consumable_x,
-                            y: consumable_y,
-                            object_id: consumable_template.id.clone(),
+                        // Find open chest template (look for object with same name + "_open" or "chest_open")
+                        let open_chest_id = format!("{}_open", chest_template.id);
+                        let open_chest_obj = object_registry.get_object(&open_chest_id);
+                        let open_object_id = open_chest_obj.map(|_| open_chest_id).or_else(|| {
+                            // Try "chest_open" as fallback
+                            object_registry.get_object("chest_open").map(|_| "chest_open".to_string())
+                        });
+                        
+                        let chest = Chest {
+                            id: format!("chest_{}", chest_id_counter),
+                            x: chest_x,
+                            y: chest_y,
+                            object_id: chest_template.id.clone(),
+                            open_object_id,
+                            is_open: false,
                         };
-                        consumables.push(consumable);
-                        consumable_id_counter += 1;
+                        chests.push(chest);
+                        chest_id_counter += 1;
                     }
                 }
             }
@@ -392,6 +413,7 @@ impl GameState {
             dungeon,
             entities,
             consumables,
+            chests,
             tile_registry,
             object_registry,
             stairs_position: stairs_pos,
@@ -406,7 +428,7 @@ impl GameState {
         player_y: usize,
         object_registry: &GameObjectRegistry,
     ) -> Option<(usize, usize)> {
-        // Find stairs object (should be type "goal" or "item", not "tile")
+        // Find stairs object (should be type "goal", not "tile")
         let stairs_obj = object_registry.get_object("stairs");
         if stairs_obj.is_none() {
             return None;
@@ -517,8 +539,40 @@ impl GameState {
             
             // Check bounds
             if new_x < self.dungeon.width && new_y < self.dungeon.height {
+                // Check if there's a closed chest at target position (highest priority)
+                if let Some(chest_idx) = self.chests.iter().position(|c| c.x == new_x && c.y == new_y && !c.is_open) {
+                    // Open chest instead of moving
+                    let chest = &mut self.chests[chest_idx];
+                    chest.is_open = true;
+                    
+                    // Spawn a potion at the chest location
+                    let potion_templates: Vec<&crate::game_object::GameObject> = self.object_registry.get_all_objects()
+                        .into_iter()
+                        .filter(|obj| obj.object_type == "consumable")
+                        .collect();
+                    
+                    if !potion_templates.is_empty() {
+                        use rand::Rng;
+                        let mut rng = rand::thread_rng();
+                        let potion_template = potion_templates[rng.gen_range(0..potion_templates.len())];
+                        
+                        use std::sync::atomic::{AtomicU64, Ordering};
+                        static CONSUMABLE_COUNTER: AtomicU64 = AtomicU64::new(0);
+                        let consumable_id = format!("consumable_{}", CONSUMABLE_COUNTER.fetch_add(1, Ordering::Relaxed));
+                        
+                        let consumable = Consumable {
+                            id: consumable_id,
+                            x: new_x,
+                            y: new_y,
+                            object_id: potion_template.id.clone(),
+                        };
+                        
+                        self.consumables.push(consumable);
+                        messages.push(GameMessage::level_event("Chest opened!".to_string()));
+                    }
+                }
                 // Check if there's an enemy (AI-controlled entity) at target position
-                if let Some(target_idx) = self.entities.iter().position(|e| {
+                else if let Some(target_idx) = self.entities.iter().position(|e| {
                     e.id != entity.id && 
                     e.x == new_x && 
                     e.y == new_y && 
@@ -530,8 +584,12 @@ impl GameState {
                         messages.push(msg);
                     }
                 } else {
-                    // No enemy, try to move
-                    self.move_entity(idx, dx, dy);
+                    // No enemy or closed chest, try to move
+                    // But check if there's an open chest - if so, allow movement
+                    let blocked_by_closed_chest = self.chests.iter().any(|c| c.x == new_x && c.y == new_y && !c.is_open);
+                    if !blocked_by_closed_chest {
+                        self.move_entity(idx, dx, dy);
+                    }
                     
                     // Check if player stepped on a consumable
                     let new_x = self.entities[idx].x;
@@ -703,23 +761,24 @@ impl GameState {
             .unwrap_or((player_x, player_y));
         self.stairs_position = Self::place_stairs(&self.dungeon, first_player_pos.0, first_player_pos.1, &self.object_registry);
         
-        // Spawn consumables
-        let consumable_templates: Vec<&crate::game_object::GameObject> = self.object_registry.get_all_objects()
+        // Don't spawn consumables in rooms - they only drop from monsters and chests
+        self.consumables.clear();
+        self.chests.clear();
+        
+        // Respawn chests
+        let chest_templates: Vec<&crate::game_object::GameObject> = self.object_registry.get_all_objects()
             .into_iter()
-            .filter(|obj| obj.object_type == "consumable")
+            .filter(|obj| obj.object_type == "chest")
             .collect();
         
-        self.consumables.clear();
-        if !consumable_templates.is_empty() {
+        if !chest_templates.is_empty() {
             use rand::Rng;
             let mut rng = rand::thread_rng();
-            let mut consumable_id_counter = 0;
+            let mut chest_id_counter = 0;
             
-            // Spawn 1-2 consumables per room
+            // Spawn 1 chest per room (50% chance)
             for room in &self.dungeon.rooms {
-                let num_consumables = rng.gen_range(1..=2);
-                for _ in 0..num_consumables {
-                    // Find a random walkable position within the room
+                if rng.gen_bool(0.5) {
                     let mut valid_positions = Vec::new();
                     for dy in 0..room.height {
                         for dx in 0..room.width {
@@ -727,15 +786,12 @@ impl GameState {
                             let y = room.y + dy;
                             if x < self.dungeon.width && y < self.dungeon.height {
                                 if self.dungeon.tiles[y][x].walkable {
-                                    // Check if position is not occupied by player
                                     if !(x == player_x && y == player_y) {
-                                        // Check if position is not occupied by another entity
                                         let occupied_by_entity = self.entities.iter().any(|e| e.x == x && e.y == y);
-                                        // Check if position is not occupied by stairs
                                         let occupied_by_stairs = self.stairs_position.map_or(false, |(sx, sy)| sx == x && sy == y);
-                                        // Check if position is not already occupied by a consumable
                                         let occupied_by_consumable = self.consumables.iter().any(|c: &Consumable| c.x == x && c.y == y);
-                                        if !occupied_by_entity && !occupied_by_stairs && !occupied_by_consumable {
+                                        let occupied_by_chest = self.chests.iter().any(|c: &Chest| c.x == x && c.y == y);
+                                        if !occupied_by_entity && !occupied_by_stairs && !occupied_by_consumable && !occupied_by_chest {
                                             valid_positions.push((x, y));
                                         }
                                     }
@@ -744,26 +800,32 @@ impl GameState {
                         }
                     }
                     
-                    // Spawn consumable if we have valid positions
                     if !valid_positions.is_empty() {
                         let pos_idx = rng.gen_range(0..valid_positions.len());
-                        let (consumable_x, consumable_y) = valid_positions[pos_idx];
+                        let (chest_x, chest_y) = valid_positions[pos_idx];
+                        let chest_template = chest_templates[rng.gen_range(0..chest_templates.len())];
                         
-                        // Select a random consumable template
-                        let consumable_template = consumable_templates[rng.gen_range(0..consumable_templates.len())];
+                        let open_chest_id = format!("{}_open", chest_template.id);
+                        let open_chest_obj = self.object_registry.get_object(&open_chest_id);
+                        let open_object_id = open_chest_obj.map(|_| open_chest_id).or_else(|| {
+                            self.object_registry.get_object("chest_open").map(|_| "chest_open".to_string())
+                        });
                         
-                        let consumable = Consumable {
-                            id: format!("consumable_{}", consumable_id_counter),
-                            x: consumable_x,
-                            y: consumable_y,
-                            object_id: consumable_template.id.clone(),
+                        let chest = Chest {
+                            id: format!("chest_{}", chest_id_counter),
+                            x: chest_x,
+                            y: chest_y,
+                            object_id: chest_template.id.clone(),
+                            open_object_id,
+                            is_open: false,  // Always spawn closed
                         };
-                        self.consumables.push(consumable);
-                        consumable_id_counter += 1;
+                        self.chests.push(chest);
+                        chest_id_counter += 1;
                     }
                 }
             }
         }
+        // Don't spawn consumables in rooms - they only drop from monsters and chests
     }
     
     pub fn confirm_stairs(&mut self, player_id: &str) -> Option<GameMessage> {
@@ -956,6 +1018,9 @@ impl GameState {
         let raw_damage = final_base_damage - target_defense;
         let damage = raw_damage.max(1) as u32;  // Minimum 1 damage
         
+        // Get target position before mutable borrow
+        let target_y = self.entities[target_idx].y;
+        
         // Apply damage to target
         let target = &mut self.entities[target_idx];
         let target_id = target.id.clone();
@@ -969,6 +1034,40 @@ impl GameState {
         
         let health_after = target.current_health;
         let target_died = health_after == 0;
+        let was_monster = target.controller == EntityController::AI;
+        
+        // If target died and it was a monster, check for potion drop (25% chance)
+        if target_died && was_monster {
+            use rand::Rng;
+            let mut rng = rand::thread_rng();
+            if rng.gen_range(0..100) < 25 {
+                // 25% chance to drop a potion
+                // Find a health potion template
+                let potion_templates: Vec<&crate::game_object::GameObject> = self.object_registry.get_all_objects()
+                    .into_iter()
+                    .filter(|obj| obj.object_type == "consumable")
+                    .collect();
+                
+                if !potion_templates.is_empty() {
+                    // Use first available potion template (or random if multiple)
+                    let potion_template = potion_templates[rng.gen_range(0..potion_templates.len())];
+                    
+                    // Create consumable at the monster's death location
+                    use std::sync::atomic::{AtomicU64, Ordering};
+                    static CONSUMABLE_COUNTER: AtomicU64 = AtomicU64::new(0);
+                    let consumable_id = format!("consumable_{}", CONSUMABLE_COUNTER.fetch_add(1, Ordering::Relaxed));
+                    
+                    let consumable = Consumable {
+                        id: consumable_id,
+                        x: target_x,
+                        y: target_y,
+                        object_id: potion_template.id.clone(),
+                    };
+                    
+                    self.consumables.push(consumable);
+                }
+            }
+        }
         
         // Update attacker's facing direction based on relative position
         if attacker_x < target_x {

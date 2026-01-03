@@ -200,7 +200,7 @@ function render() {
         }
     }
     
-    // Draw all entities (player + AI) on top of tiles, but only if within viewport
+    // Draw all entities (player + AI) on top of tiles, but behind chests and consumables
     if (gameState.entities) {
         for (const entity of gameState.entities) {
             // Check if entity is within viewport
@@ -275,7 +275,54 @@ function render() {
         }
     }
     
-    // Draw consumables on top of tiles and entities
+    // Draw chests on top of tiles and entities, but behind consumables
+    if (gameState.chests && Array.isArray(gameState.chests)) {
+        for (const chest of gameState.chests) {
+            const chestX = chest.x;
+            const chestY = chest.y;
+            
+            // Check if chest is within viewport
+            if (chestX >= viewportMinX && chestX <= viewportMaxX &&
+                chestY >= viewportMinY && chestY <= viewportMaxY) {
+                
+                // Calculate position relative to viewport, with offset to center on canvas
+                const viewportX = chestX - viewportMinX;
+                const viewportY = chestY - viewportMinY;
+                const destX = viewportX * TILE_SIZE + offsetX;
+                const destY = viewportY * TILE_SIZE + offsetY;
+                
+                // Get sprite sheet for this chest
+                const chestSpriteSheet = getSpriteSheet(chest.sprite_sheet || DEFAULT_SPRITE_SHEET);
+                
+                // Use open sprite if chest is open, otherwise use closed sprite
+                // Note: is_open should be a boolean, but check for truthy/falsy to be safe
+                const isOpen = chest.is_open === true || chest.is_open === "true";
+                const spriteX = isOpen ? chest.open_sprite_x : chest.sprite_x;
+                const spriteY = isOpen ? chest.open_sprite_y : chest.sprite_y;
+                
+                if (spriteX !== undefined && spriteY !== undefined && 
+                    chestSpriteSheet && chestSpriteSheet.complete) {
+                    const srcX = spriteX * SPRITE_SHEET_TILE_SIZE;
+                    const srcY = spriteY * SPRITE_SHEET_TILE_SIZE;
+                    
+                    ctx.globalCompositeOperation = 'source-over';
+                    ctx.imageSmoothingEnabled = false;
+                    
+                    ctx.drawImage(
+                        chestSpriteSheet,
+                        srcX, srcY, SPRITE_SHEET_TILE_SIZE, SPRITE_SHEET_TILE_SIZE,
+                        destX, destY, TILE_SIZE, TILE_SIZE
+                    );
+                } else {
+                    // Fallback to colored rectangle if sprite not available
+                    ctx.fillStyle = isOpen ? '#8b4513' : '#654321'; // Brown for chests (darker when closed)
+                    ctx.fillRect(destX, destY, TILE_SIZE, TILE_SIZE);
+                }
+            }
+        }
+    }
+    
+    // Draw consumables on top of everything (including chests)
     if (gameState.consumables && Array.isArray(gameState.consumables)) {
         for (const consumable of gameState.consumables) {
             const consumableX = consumable.x;
@@ -402,6 +449,12 @@ function updateHealthBar() {
         if (document.getElementById('defenseValue')) {
             document.getElementById('defenseValue').textContent = '-';
         }
+        if (document.getElementById('critChanceValue')) {
+            document.getElementById('critChanceValue').textContent = '-';
+        }
+        if (document.getElementById('critDamageValue')) {
+            document.getElementById('critDamageValue').textContent = '-';
+        }
         return;
     }
     
@@ -431,6 +484,16 @@ function updateHealthBar() {
     // Update defense value
     if (document.getElementById('defenseValue')) {
         document.getElementById('defenseValue').textContent = (player.defense || 0).toString();
+    }
+    
+    // Update crit chance value
+    if (document.getElementById('critChanceValue')) {
+        document.getElementById('critChanceValue').textContent = (player.crit_chance_percent || 0).toString() + '%';
+    }
+    
+    // Update crit damage value
+    if (document.getElementById('critDamageValue')) {
+        document.getElementById('critDamageValue').textContent = (player.crit_damage_percent || 100).toString() + '%';
     }
 }
 
@@ -520,9 +583,18 @@ async function handleGameStateUpdate(newGameState) {
     if (gameState.consumables) {
         for (const consumable of gameState.consumables) {
             if (consumable.sprite_sheet) {
+                await loadSpriteSheet(consumable.sprite_sheet);
+            }
+        }
+    }
+    
+    // Load sprite sheets for all chests
+    if (gameState.chests) {
+        for (const chest of gameState.chests) {
+            if (chest.sprite_sheet) {
                 spriteSheetPromises.push(
-                    loadSpriteSheet(consumable.sprite_sheet)
-                        .catch((e) => console.error(`Could not load sprite sheet "${consumable.sprite_sheet}":`, e))
+                    loadSpriteSheet(chest.sprite_sheet)
+                        .catch((e) => console.error(`Could not load sprite sheet "${chest.sprite_sheet}":`, e))
                 );
             }
         }

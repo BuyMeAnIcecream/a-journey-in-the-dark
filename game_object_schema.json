@@ -1,0 +1,156 @@
+{
+  "fields": [
+    {
+      "name": "id",
+      "field_type": "String",
+      "optional": false,
+      "default": null,
+      "show_for_types": [],
+      "label": "ID"
+    },
+    {
+      "name": "name",
+      "field_type": "String",
+      "optional": false,
+      "default": null,
+      "show_for_types": [],
+      "label": "Name"
+    },
+    {
+      "name": "object_type",
+      "field_type": "String",
+      "optional": false,
+      "default": null,
+      "show_for_types": [],
+      "label": "Type"
+    },
+    {
+      "name": "walkable",
+      "field_type": "bool",
+      "optional": false,
+      "default": "false",
+      "show_for_types": [
+        "tile"
+      ],
+      "label": "Walkable"
+    },
+    {
+      "name": "health",
+      "field_type": "Option<u32>",
+      "optional": true,
+      "default": null,
+      "show_for_types": [
+        "character",
+        "item"
+      ],
+      "label": "Health"
+    },
+    {
+      "name": "attack",
+      "field_type": "Option<i32>",
+      "optional": true,
+      "default": null,
+      "show_for_types": [
+        "character",
+        "item"
+      ],
+      "label": "Attack"
+    },
+    {
+      "name": "defense",
+      "field_type": "Option<i32>",
+      "optional": true,
+      "default": null,
+      "show_for_types": [
+        "character",
+        "item"
+      ],
+      "label": "Defense"
+    },
+    {
+      "name": "attack_spread_percent",
+      "field_type": "Option<u32>",
+      "optional": true,
+      "default": "20",
+      "show_for_types": [
+        "character",
+        "item"
+      ],
+      "label": "Attack Spread %"
+    },
+    {
+      "name": "crit_chance_percent",
+      "field_type": "Option<u32>",
+      "optional": true,
+      "default": "0",
+      "show_for_types": [
+        "character",
+        "item"
+      ],
+      "label": "Crit Chance %"
+    },
+    {
+      "name": "crit_damage_percent",
+      "field_type": "Option<u32>",
+      "optional": true,
+      "default": "150",
+      "show_for_types": [
+        "character",
+        "item"
+      ],
+      "label": "Crit Damage %"
+    },
+    {
+      "name": "monster",
+      "field_type": "Option<bool>",
+      "optional": true,
+      "default": "false",
+      "show_for_types": [
+        "character"
+      ],
+      "label": "Monster"
+    },
+    {
+      "name": "healing_power",
+      "field_type": "Option<u32>",
+      "optional": true,
+      "default": null,
+      "show_for_types": [
+        "consumable"
+      ],
+      "label": "Healing Power"
+    },
+    {
+      "name": "sprites",
+      "field_type": "Vec<SpriteCoord>",
+      "optional": false,
+      "default": "[]",
+      "show_for_types": [],
+      "label": "Sprites"
+    },
+    {
+      "name": "sprite_sheet",
+      "field_type": "Option<String>",
+      "optional": true,
+      "default": null,
+      "show_for_types": [],
+      "label": "Sprite Sheet"
+    },
+    {
+      "name": "sprite_x",
+      "field_type": "Option<u32>",
+      "optional": true,
+      "default": null,
+      "show_for_types": [],
+      "label": null
+    },
+    {
+      "name": "sprite_y",
+      "field_type": "Option<u32>",
+      "optional": true,
+      "default": null,
+      "show_for_types": [],
+      "label": null
+    }
+  ]
+}

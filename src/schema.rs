@@ -56,7 +56,7 @@ impl GameObjectSchema {
                 field_type: "Option<u32>".to_string(),
                 optional: true,
                 default: None,
-                show_for_types: vec!["character".to_string(), "item".to_string()],
+                show_for_types: vec!["character".to_string()],
                 label: Some("Health".to_string()),
             },
             FieldSchema {
@@ -64,7 +64,7 @@ impl GameObjectSchema {
                 field_type: "Option<i32>".to_string(),
                 optional: true,
                 default: None,
-                show_for_types: vec!["character".to_string(), "item".to_string()],
+                show_for_types: vec!["character".to_string()],
                 label: Some("Attack".to_string()),
             },
             FieldSchema {
@@ -72,7 +72,7 @@ impl GameObjectSchema {
                 field_type: "Option<i32>".to_string(),
                 optional: true,
                 default: None,
-                show_for_types: vec!["character".to_string(), "item".to_string()],
+                show_for_types: vec!["character".to_string()],
                 label: Some("Defense".to_string()),
             },
             FieldSchema {
@@ -80,7 +80,7 @@ impl GameObjectSchema {
                 field_type: "Option<u32>".to_string(),
                 optional: true,
                 default: Some("20".to_string()),
-                show_for_types: vec!["character".to_string(), "item".to_string()],
+                show_for_types: vec!["character".to_string()],
                 label: Some("Attack Spread %".to_string()),
             },
             FieldSchema {
@@ -88,7 +88,7 @@ impl GameObjectSchema {
                 field_type: "Option<u32>".to_string(),
                 optional: true,
                 default: Some("0".to_string()),
-                show_for_types: vec!["character".to_string(), "item".to_string()],
+                show_for_types: vec!["character".to_string()],
                 label: Some("Crit Chance %".to_string()),
             },
             FieldSchema {
@@ -96,7 +96,7 @@ impl GameObjectSchema {
                 field_type: "Option<u32>".to_string(),
                 optional: true,
                 default: Some("150".to_string()),
-                show_for_types: vec!["character".to_string(), "item".to_string()],
+                show_for_types: vec!["character".to_string()],
                 label: Some("Crit Damage %".to_string()),
             },
             FieldSchema {

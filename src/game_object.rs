@@ -10,7 +10,7 @@ pub struct SpriteCoord {
 pub struct GameObject {
     pub id: String,
     pub name: String,
-    pub object_type: String,  // "tile", "character", "item", etc.
+    pub object_type: String,  // "tile", "character", "consumable", "chest", "goal", etc.
     pub walkable: bool,
     pub health: Option<u32>,  // None for tiles, Some(value) for entities
     #[serde(default)]

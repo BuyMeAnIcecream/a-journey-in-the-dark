@@ -38,6 +38,8 @@ struct EntityData {
     max_health: u32,
     attack: i32,
     defense: i32,
+    crit_chance_percent: u32,
+    crit_damage_percent: u32,
     facing_right: bool,  // true = facing right, false = facing left (needs mirroring)
 }
 
@@ -53,10 +55,26 @@ struct ConsumableData {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
+struct ChestData {
+    id: String,
+    object_id: String,  // Closed chest sprite
+    open_object_id: Option<String>,  // Open chest sprite (if different)
+    x: usize,
+    y: usize,
+    sprite_x: u32,
+    sprite_y: u32,
+    open_sprite_x: u32,
+    open_sprite_y: u32,
+    sprite_sheet: Option<String>,
+    is_open: bool,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
 struct GameUpdate {
     map: Vec<Vec<crate::tile::Tile>>,
     entities: Vec<EntityData>,  // All entities (player + AI)
     consumables: Vec<ConsumableData>,  // All consumables on the map
+    chests: Vec<ChestData>,  // All chests on the map
     width: usize,
     height: usize,
     messages: Vec<GameMessage>,  // Game messages (combat, level events, system)
@@ -173,6 +191,8 @@ async fn generate_map_endpoint() -> Json<GameUpdate> {
                 max_health: entity.max_health,
                 attack: entity.attack,
                 defense: entity.defense,
+                crit_chance_percent: entity.crit_chance_percent,
+                crit_damage_percent: entity.crit_damage_percent,
                 facing_right: entity.facing_right,
             }
         })
@@ -199,6 +219,44 @@ async fn generate_map_endpoint() -> Json<GameUpdate> {
         })
         .collect();
     
+    // Convert chests to ChestData
+    let chests: Vec<ChestData> = game_state.chests.iter()
+        .map(|chest| {
+            let closed_obj = game_state.object_registry.get_object(&chest.object_id);
+            let (sprite_x, sprite_y) = closed_obj
+                .and_then(|o| o.get_sprites_vec().first().map(|s| (s.x, s.y)))
+                .unwrap_or((0, 0));
+            let sprite_sheet = closed_obj.and_then(|o| o.sprite_sheet.clone());
+            
+            // Calculate open sprite coordinates (only used when chest is open)
+            // When closed, we'll use sprite_x/sprite_y, but we still need to calculate open_sprite_x/y
+            // in case the chest gets opened later
+            let (open_sprite_x, open_sprite_y) = if let Some(open_id) = &chest.open_object_id {
+                if let Some(open_obj) = game_state.object_registry.get_object(open_id) {
+                    open_obj.get_sprites_vec().first().map(|s| (s.x, s.y)).unwrap_or((sprite_x, sprite_y))
+                } else {
+                    (sprite_x, sprite_y)  // Fallback to closed sprite if open object not found
+                }
+            } else {
+                (sprite_x, sprite_y)  // No open object defined, use closed sprite
+            };
+            
+            ChestData {
+                id: chest.id.clone(),
+                object_id: chest.object_id.clone(),
+                open_object_id: chest.open_object_id.clone(),
+                x: chest.x,
+                y: chest.y,
+                sprite_x,
+                sprite_y,
+                open_sprite_x,
+                open_sprite_y,
+                sprite_sheet,
+                is_open: chest.is_open,
+            }
+        })
+        .collect();
+    
     // Check if preview player is on stairs
     let on_stairs = game_state.stairs_position.map_or(false, |(sx, sy)| {
         game_state.entities.iter().any(|e| e.id == preview_player_id && e.x == sx && e.y == sy)
@@ -208,6 +266,7 @@ async fn generate_map_endpoint() -> Json<GameUpdate> {
         map: game_state.dungeon.tiles.clone(),
         entities,
         consumables,
+        chests,
         width: game_state.dungeon.width,
         height: game_state.dungeon.height,
         messages: Vec::new(),
@@ -268,6 +327,8 @@ async fn handle_socket(socket: WebSocket, state: SharedState, tx: Tx) {
                     max_health: entity.max_health,
                     attack: entity.attack,
                     defense: entity.defense,
+                    crit_chance_percent: entity.crit_chance_percent,
+                    crit_damage_percent: entity.crit_damage_percent,
                     facing_right: entity.facing_right,
                 }
             })
@@ -294,6 +355,42 @@ async fn handle_socket(socket: WebSocket, state: SharedState, tx: Tx) {
             })
             .collect();
         
+        // Convert chests to ChestData
+        let chests: Vec<ChestData> = game.chests.iter()
+            .map(|chest| {
+                let closed_obj = game.object_registry.get_object(&chest.object_id);
+                let (sprite_x, sprite_y) = closed_obj
+                    .and_then(|o| o.get_sprites_vec().first().map(|s| (s.x, s.y)))
+                    .unwrap_or((0, 0));
+                let sprite_sheet = closed_obj.and_then(|o| o.sprite_sheet.clone());
+                
+                // Calculate open sprite coordinates (only used when chest is open)
+                let (open_sprite_x, open_sprite_y) = if let Some(open_id) = &chest.open_object_id {
+                    if let Some(open_obj) = game.object_registry.get_object(open_id) {
+                        open_obj.get_sprites_vec().first().map(|s| (s.x, s.y)).unwrap_or((sprite_x, sprite_y))
+                    } else {
+                        (sprite_x, sprite_y)  // Fallback to closed sprite if open object not found
+                    }
+                } else {
+                    (sprite_x, sprite_y)  // No open object defined, use closed sprite
+                };
+                
+                ChestData {
+                    id: chest.id.clone(),
+                    object_id: chest.object_id.clone(),
+                    open_object_id: chest.open_object_id.clone(),
+                    x: chest.x,
+                    y: chest.y,
+                    sprite_x,
+                    sprite_y,
+                    open_sprite_x,
+                    open_sprite_y,
+                    sprite_sheet,
+                    is_open: chest.is_open,
+                }
+            })
+            .collect();
+        
         // Check if current player is on stairs
         let on_stairs = game.stairs_position.map_or(false, |(sx, sy)| {
             game.entities.iter().any(|e| e.id == player_id && e.x == sx && e.y == sy)
@@ -303,6 +400,7 @@ async fn handle_socket(socket: WebSocket, state: SharedState, tx: Tx) {
             map: game.dungeon.tiles.clone(),
             entities,
             consumables,
+            chests,
             width: game.dungeon.width,
             height: game.dungeon.height,
             messages: Vec::new(),  // No messages on initial state
@@ -363,6 +461,8 @@ async fn handle_socket(socket: WebSocket, state: SharedState, tx: Tx) {
                             max_health: entity.max_health,
                             attack: entity.attack,
                             defense: entity.defense,
+                            crit_chance_percent: entity.crit_chance_percent,
+                            crit_damage_percent: entity.crit_damage_percent,
                             facing_right: entity.facing_right,
                         }
                     })
@@ -397,10 +497,47 @@ async fn handle_socket(socket: WebSocket, state: SharedState, tx: Tx) {
                     game.entities.iter().any(|e| e.id == player_id_clone && e.x == sx && e.y == sy)
                 });
                 
+                // Convert chests to ChestData
+                let chests: Vec<ChestData> = game.chests.iter()
+                    .map(|chest| {
+                        let closed_obj = game.object_registry.get_object(&chest.object_id);
+                        let (sprite_x, sprite_y) = closed_obj
+                            .and_then(|o| o.get_sprites_vec().first().map(|s| (s.x, s.y)))
+                            .unwrap_or((0, 0));
+                        let sprite_sheet = closed_obj.and_then(|o| o.sprite_sheet.clone());
+                        
+                        // Calculate open sprite coordinates (only used when chest is open)
+                        let (open_sprite_x, open_sprite_y) = if let Some(open_id) = &chest.open_object_id {
+                            if let Some(open_obj) = game.object_registry.get_object(open_id) {
+                                open_obj.get_sprites_vec().first().map(|s| (s.x, s.y)).unwrap_or((sprite_x, sprite_y))
+                            } else {
+                                (sprite_x, sprite_y)  // Fallback to closed sprite if open object not found
+                            }
+                        } else {
+                            (sprite_x, sprite_y)  // No open object defined, use closed sprite
+                        };
+                        
+                        ChestData {
+                            id: chest.id.clone(),
+                            object_id: chest.object_id.clone(),
+                            open_object_id: chest.open_object_id.clone(),
+                            x: chest.x,
+                            y: chest.y,
+                            sprite_x,
+                            sprite_y,
+                            open_sprite_x,
+                            open_sprite_y,
+                            sprite_sheet,
+                            is_open: chest.is_open,
+                        }
+                    })
+                    .collect();
+                
                 let update = serde_json::to_string(&GameUpdate {
                     map: game.dungeon.tiles.clone(),
                     entities,
                     consumables,
+                    chests,
                     width: game.dungeon.width,
                     height: game.dungeon.height,
                     messages,

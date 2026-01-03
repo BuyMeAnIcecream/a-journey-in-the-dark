@@ -221,7 +221,7 @@ class GameObjectEditor:
         if "object_type" in self.prop_widgets:
             self.prop_widgets["object_type"].grid_remove()
         type_combo = ttk.Combobox(middle_panel, textvariable=self.prop_vars["object_type"][0], 
-                                  values=["tile", "character", "item", "goal", "consumable"], width=17)
+                                  values=["tile", "character", "goal", "consumable", "chest"], width=17)
         type_combo.grid(row=2, column=1, sticky=(tk.W, tk.E), pady=5)
         type_combo.bind("<<ComboboxSelected>>", lambda e: self._on_object_type_changed())
         # Update the widget reference to point to the Combobox
@@ -1386,43 +1386,50 @@ class GameObjectEditor:
         # Update properties
         for key, (var, dtype) in self.prop_vars.items():
             if key == "health":
-                val = var.get()
-                self.current_object["health"] = int(val) if val.strip() else None
+                val = var.get().strip()
+                self.current_object["health"] = int(val) if val and val.lower() != "none" else None
             elif key == "attack":
-                val = var.get()
+                val = var.get().strip()
                 # Store attack as top-level property (not in properties map)
-                self.current_object["attack"] = int(val) if val.strip() else None
+                self.current_object["attack"] = int(val) if val and val.lower() != "none" else None
                 # Remove from properties map if it was there
                 if "properties" in self.current_object and "attack" in self.current_object["properties"]:
                     del self.current_object["properties"]["attack"]
             elif key == "defense":
-                val = var.get()
+                val = var.get().strip()
                 # Store defense as top-level property (not in properties map)
-                self.current_object["defense"] = int(val) if val.strip() else None
+                self.current_object["defense"] = int(val) if val and val.lower() != "none" else None
                 # Remove from properties map if it was there
                 if "properties" in self.current_object and "defense" in self.current_object["properties"]:
                     del self.current_object["properties"]["defense"]
             elif key == "attack_spread_percent":
-                val = var.get()
+                val = var.get().strip()
                 # Store attack_spread_percent as top-level property (not in properties map)
-                self.current_object["attack_spread_percent"] = int(val) if val.strip() else None
+                self.current_object["attack_spread_percent"] = int(val) if val and val.lower() != "none" else None
                 # Remove from properties map if it was there
                 if "properties" in self.current_object and "attack_spread_percent" in self.current_object["properties"]:
                     del self.current_object["properties"]["attack_spread_percent"]
             elif key == "crit_chance_percent":
-                val = var.get()
+                val = var.get().strip()
                 # Store crit_chance_percent as top-level property (not in properties map)
-                self.current_object["crit_chance_percent"] = int(val) if val.strip() else None
+                self.current_object["crit_chance_percent"] = int(val) if val and val.lower() != "none" else None
                 # Remove from properties map if it was there
                 if "properties" in self.current_object and "crit_chance_percent" in self.current_object["properties"]:
                     del self.current_object["properties"]["crit_chance_percent"]
             elif key == "crit_damage_percent":
-                val = var.get()
+                val = var.get().strip()
                 # Store crit_damage_percent as top-level property (not in properties map)
-                self.current_object["crit_damage_percent"] = int(val) if val.strip() else None
+                self.current_object["crit_damage_percent"] = int(val) if val and val.lower() != "none" else None
                 # Remove from properties map if it was there
                 if "properties" in self.current_object and "crit_damage_percent" in self.current_object["properties"]:
                     del self.current_object["properties"]["crit_damage_percent"]
+            elif key == "healing_power":
+                val = var.get().strip()
+                # Store healing_power as top-level property (not in properties map)
+                self.current_object["healing_power"] = int(val) if val and val.lower() != "none" else None
+                # Remove from properties map if it was there
+                if "properties" in self.current_object and "healing_power" in self.current_object["properties"]:
+                    del self.current_object["properties"]["healing_power"]
             elif key == "sprite_sheet":
                 val = var.get().strip()
                 if val:
@@ -1442,7 +1449,17 @@ class GameObjectEditor:
             elif dtype == bool:
                 self.current_object[key] = var.get()
             elif dtype == int:
-                self.current_object[key] = int(var.get() or "0")
+                val = var.get().strip() if isinstance(var.get(), str) else str(var.get())
+                # Handle "None" string and empty values
+                if not val or val.lower() == "none":
+                    # Only set to None if this is an optional field (not required)
+                    # For required int fields, use 0 as default
+                    self.current_object[key] = None if key in ["health", "attack", "defense", "attack_spread_percent", "crit_chance_percent", "crit_damage_percent", "healing_power"] else 0
+                else:
+                    try:
+                        self.current_object[key] = int(val)
+                    except ValueError:
+                        self.current_object[key] = 0
             else:
                 self.current_object[key] = var.get()
         
