@@ -384,9 +384,54 @@ function render() {
     }
 }
 
+// Update health bar
+function updateHealthBar() {
+    if (!gameState || !gameState.entities) {
+        return;
+    }
+    
+    // Find the player entity
+    const player = gameState.entities.find(e => e.controller === 'Player' && e.current_health > 0);
+    
+    if (!player) {
+        // Player is dead or not found
+        document.getElementById('healthText').textContent = '0 / 0';
+        document.getElementById('healthFill').style.width = '0%';
+        document.getElementById('healthFill').className = 'health-fill critical';
+        document.getElementById('attackValue').textContent = '-';
+        return;
+    }
+    
+    // Update health text
+    document.getElementById('healthText').textContent = `${player.current_health} / ${player.max_health}`;
+    
+    // Calculate health percentage
+    const healthPercent = (player.current_health / player.max_health) * 100;
+    document.getElementById('healthFill').style.width = `${healthPercent}%`;
+    
+    // Update health bar color based on percentage
+    const healthFill = document.getElementById('healthFill');
+    healthFill.className = 'health-fill';
+    if (healthPercent > 75) {
+        healthFill.classList.add('high');
+    } else if (healthPercent > 50) {
+        healthFill.classList.add('medium');
+    } else if (healthPercent > 25) {
+        healthFill.classList.add('low');
+    } else {
+        healthFill.classList.add('critical');
+    }
+    
+    // Update attack value
+    document.getElementById('attackValue').textContent = player.attack.toString();
+}
+
 // Handle game state updates
 async function handleGameStateUpdate(newGameState) {
     gameState = newGameState;
+    
+    // Update health bar
+    updateHealthBar();
     
     // Process all messages from server (combat, level events, system)
     if (gameState.messages && gameState.messages.length > 0) {
@@ -480,6 +525,10 @@ async function handleGameStateUpdate(newGameState) {
     if (statusDiv) {
         statusDiv.textContent = 'Connected - Rendering...';
     }
+    
+    // Update health bar
+    updateHealthBar();
+    
     render();
 }
 

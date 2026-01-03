@@ -24,6 +24,85 @@
             overflow-x: hidden;
         }
         
+        #gameArea {
+            display: flex;
+            flex-direction: row;
+            align-items: flex-start;
+            gap: 20px;
+            flex-shrink: 0;
+        }
+        
+        #healthBar {
+            width: 200px;
+            background: #0a0a0a;
+            border: 2px solid #444;
+            padding: 15px;
+            flex-shrink: 0;
+        }
+        
+        #healthBar h2 {
+            font-size: 16px;
+            margin-bottom: 15px;
+            color: #fff;
+            text-align: center;
+        }
+        
+        #healthBar .stat {
+            margin-bottom: 15px;
+        }
+        
+        #healthBar .stat-label {
+            font-size: 12px;
+            color: #888;
+            margin-bottom: 5px;
+        }
+        
+        #healthBar .stat-value {
+            font-size: 14px;
+            color: #fff;
+        }
+        
+        #healthBar .health-container {
+            margin-top: 10px;
+        }
+        
+        #healthBar .health-bar {
+            width: 100%;
+            height: 20px;
+            background: #222;
+            border: 1px solid #444;
+            position: relative;
+            overflow: hidden;
+        }
+        
+        #healthBar .health-fill {
+            height: 100%;
+            background: linear-gradient(to right, #ff0000, #ff4444);
+            transition: width 0.3s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #fff;
+            font-size: 11px;
+            font-weight: bold;
+        }
+        
+        #healthBar .health-fill.high {
+            background: linear-gradient(to right, #00ff00, #44ff44);
+        }
+        
+        #healthBar .health-fill.medium {
+            background: linear-gradient(to right, #ffff00, #ffff44);
+        }
+        
+        #healthBar .health-fill.low {
+            background: linear-gradient(to right, #ff8800, #ffaa44);
+        }
+        
+        #healthBar .health-fill.critical {
+            background: linear-gradient(to right, #ff0000, #ff4444);
+        }
+        
         #gameContainer {
             border: 2px solid #444;
             background: #000;
@@ -87,7 +166,25 @@
 </head>
 <body>
     <h1>Roguelike Dungeon</h1>
-    <canvas id="gameContainer"></canvas>
+    <div id="gameArea">
+        <div id="healthBar">
+            <h2>Status</h2>
+            <div class="stat">
+                <div class="stat-label">Health</div>
+                <div class="stat-value" id="healthText">- / -</div>
+                <div class="health-container">
+                    <div class="health-bar">
+                        <div class="health-fill" id="healthFill" style="width: 100%"></div>
+                    </div>
+                </div>
+            </div>
+            <div class="stat">
+                <div class="stat-label">Attack</div>
+                <div class="stat-value" id="attackValue">-</div>
+            </div>
+        </div>
+        <canvas id="gameContainer"></canvas>
+    </div>
     <div id="status">Connecting...</div>
     <div id="controls">Use Arrow Keys or WASD to move</div>
     <div id="console"></div>
