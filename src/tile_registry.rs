@@ -32,9 +32,26 @@ impl TileRegistry {
         self.objects.get(id)
     }
 
-    #[allow(dead_code)]
     pub fn get_all_tiles(&self) -> Vec<&GameObject> {
         self.objects.values().collect()
+    }
+    
+    /// Get all walkable tiles (floors)
+    pub fn get_walkable_tiles(&self) -> Vec<Tile> {
+        self.objects
+            .values()
+            .filter(|obj| obj.walkable && obj.object_type == "tile")
+            .map(|obj| Tile::from(obj))
+            .collect()
+    }
+    
+    /// Get all non-walkable tiles (walls)
+    pub fn get_wall_tiles(&self) -> Vec<Tile> {
+        self.objects
+            .values()
+            .filter(|obj| !obj.walkable && obj.object_type == "tile")
+            .map(|obj| Tile::from(obj))
+            .collect()
     }
 
     // Fallback methods for backward compatibility

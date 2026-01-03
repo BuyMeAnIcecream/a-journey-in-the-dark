@@ -113,6 +113,12 @@ class GameObjectEditor:
             
             widget.grid(row=i, column=1, sticky=(tk.W, tk.E), pady=5)
             self.prop_vars[key] = (var, dtype)
+            
+            # Add auto-save on field change
+            if dtype == bool:
+                var.trace_add("write", lambda *args, k=key: self._on_property_change(k))
+            else:
+                var.trace_add("write", lambda *args, k=key: self._on_property_change(k))
         
         # Type dropdown
         type_combo = ttk.Combobox(middle_panel, textvariable=self.prop_vars["object_type"][0], 
@@ -156,6 +162,8 @@ class GameObjectEditor:
         self.custom_props_text = tk.Text(middle_panel, width=30, height=5)
         self.custom_props_text.grid(row=sprite_row+4, column=0, columnspan=2, 
                                     sticky=(tk.W, tk.E), pady=5)
+        # Add auto-save on custom properties change
+        self.custom_props_text.bind("<KeyRelease>", lambda e: self._on_property_change("properties"))
         
         # Note: Save is now handled by the main "Save" button at the bottom
         
@@ -219,29 +227,71 @@ class GameObjectEditor:
         self.sprite_canvas.bind("<Enter>", lambda e: self.sprite_canvas.focus_set())
         self.sprite_canvas.bind("<Leave>", lambda e: self.root.focus_set())
         
-        # Bottom - Action buttons
-        button_frame = ttk.Frame(main_frame)
-        button_frame.grid(row=1, column=0, columnspan=3, pady=(10, 0))
-        ttk.Button(button_frame, text="Save", command=self.save_all).pack(side=tk.LEFT, padx=5)
+        # Bottom - Action buttons and status
+        bottom_frame = ttk.Frame(main_frame)
+        bottom_frame.grid(row=1, column=0, columnspan=3, pady=(10, 0), sticky=(tk.W, tk.E))
+        
+        button_frame = ttk.Frame(bottom_frame)
+        button_frame.pack(side=tk.LEFT)
         ttk.Button(button_frame, text="Restart Server", command=self.restart_server).pack(side=tk.LEFT, padx=5)
         self.server_status_label = ttk.Label(button_frame, text="Server: Unknown", foreground="gray")
         self.server_status_label.pack(side=tk.LEFT, padx=10)
         
+        # Status log area
+        status_frame = ttk.LabelFrame(bottom_frame, text="Status", padding="5")
+        status_frame.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(10, 0))
+        self.status_label = ttk.Label(status_frame, text="Ready", foreground="gray", wraplength=400)
+        self.status_label.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        
         # Check server status on startup
         self.root.after(1000, self.check_server_status)
+        
+        # Status logging method
+        self.log_status("Editor ready")
         
         # Configure grid weights
         self.root.columnconfigure(0, weight=1)
         self.root.rowconfigure(0, weight=1)
         main_frame.columnconfigure(1, weight=1)
         main_frame.rowconfigure(0, weight=1)
-        
+    
+    def log_status(self, message, level="info"):
+        """Log a status message to the status label"""
+        colors = {
+            "info": "black",
+            "success": "green",
+            "warning": "orange",
+            "error": "red"
+        }
+        color = colors.get(level, "black")
+        self.status_label.config(text=message, foreground=color)
+        # Auto-clear success messages after 3 seconds
+        if level == "success":
+            self.root.after(3000, lambda: self.log_status("Ready", "info"))
+    
+    def _on_property_change(self, key):
+        """Handle property change - auto-save after a short delay"""
+        if not self.current_object:
+            return
+        # Debounce: cancel previous auto-save and schedule a new one
+        if hasattr(self, '_auto_save_job'):
+            self.root.after_cancel(self._auto_save_job)
+        # Auto-save after 500ms of no changes
+        self._auto_save_job = self.root.after(500, self._auto_save_object)
+    
+    def _auto_save_object(self):
+        """Auto-save current object changes"""
+        if self.current_object:
+            try:
+                self._save_current_object_changes()
+            except Exception as e:
+                # Don't show error for auto-save, just log it
+                print(f"Auto-save error: {e}")
+    
     def load_config(self):
         """Load game config from TOML file"""
         if not self.config_path.exists():
-            messagebox.showwarning("Config Not Found", 
-                                  f"Config file not found at {self.config_path}\n"
-                                  "A default config will be created.")
+            self.log_status(f"Config file not found. Creating default config.", "warning")
             self.config = {"game_objects": []}
             self.save_config()
             return
@@ -263,8 +313,9 @@ class GameObjectEditor:
                     self.save_config()
             
             self.refresh_object_list()
+            self.log_status(f"Loaded {len(self.config.get('game_objects', []))} game objects", "success")
         except Exception as e:
-            messagebox.showerror("Error", f"Failed to load config: {e}")
+            self.log_status(f"Failed to load config: {e}", "error")
             self.config = {"game_objects": []}
     
     def create_default_objects(self):
@@ -391,8 +442,7 @@ class GameObjectEditor:
     def load_sprite_sheet(self):
         """Load sprite sheet image"""
         if not self.sprite_sheet_path.exists():
-            messagebox.showwarning("Sprite Sheet Not Found",
-                                  f"Sprite sheet not found at {self.sprite_sheet_path}")
+            self.log_status(f"Sprite sheet not found: {self.sprite_sheet_path}", "error")
             return
         
         try:
@@ -400,8 +450,9 @@ class GameObjectEditor:
             self.original_sprite_image = Image.open(self.sprite_sheet_path)
             self.zoom_level = 1.0
             self.update_sprite_display()
+            self.log_status(f"Loaded sprite sheet: {self.current_sprite_sheet}", "success")
         except Exception as e:
-            messagebox.showerror("Error", f"Failed to load sprite sheet: {e}")
+            self.log_status(f"Failed to load sprite sheet: {e}", "error")
     
     def update_sprite_display(self):
         """Update the sprite sheet display with current zoom level"""
@@ -517,11 +568,13 @@ class GameObjectEditor:
                 elif dtype == int:
                     var.set(str(obj.get(key, "")))
                 else:
+                    # For string fields like sprite_sheet, preserve the value
                     var.set(str(obj.get(key, "")))
             else:
                 if dtype == bool:
                     var.set(False)
                 else:
+                    # Don't clear string fields - they might have values we want to preserve
                     var.set("")
         
         # Handle health (can be None)
@@ -556,13 +609,16 @@ class GameObjectEditor:
     def add_sprite_from_click(self):
         """Add sprite from last click or prompt for coordinates"""
         if not self.current_object:
-            messagebox.showwarning("No Selection", "Please select an object first")
+            self.log_status("Please select an object first", "warning")
             return
         
         if self.last_clicked_sprite:
             x, y = self.last_clicked_sprite
             self.sprite_listbox.insert(tk.END, f"({x}, {y})")
             self.last_clicked_sprite = None
+            # Auto-save after adding sprite
+            if self.current_object:
+                self._save_current_object_changes()
         else:
             # Prompt for coordinates
             dialog = tk.Toplevel(self.root)
@@ -583,8 +639,11 @@ class GameObjectEditor:
                     y = int(y_var.get())
                     self.sprite_listbox.insert(tk.END, f"({x}, {y})")
                     dialog.destroy()
+                    # Auto-save after adding sprite
+                    if self.current_object:
+                        self._save_current_object_changes()
                 except ValueError:
-                    messagebox.showerror("Error", "Please enter valid numbers")
+                    self.log_status("Please enter valid numbers", "error")
             
             ttk.Button(dialog, text="Add", command=add_sprite).grid(row=2, column=0, columnspan=2, pady=10)
     
@@ -593,6 +652,9 @@ class GameObjectEditor:
         selection = self.sprite_listbox.curselection()
         if selection:
             self.sprite_listbox.delete(selection[0])
+            # Auto-save after removing sprite
+            if self.current_object:
+                self._save_current_object_changes()
     
     def add_object(self):
         """Add a new game object"""
@@ -616,11 +678,14 @@ class GameObjectEditor:
         # Select the new object
         self.object_listbox.selection_set(len(self.config["game_objects"]) - 1)
         self.object_listbox.see(len(self.config["game_objects"]) - 1)
+        # Auto-save after adding object
+        self.save_config(show_message=True)
+        self.log_status("New object added", "success")
     
     def delete_object(self):
         """Delete selected object"""
         if not self.current_object:
-            messagebox.showwarning("No Selection", "Please select an object to delete")
+            self.log_status("Please select an object to delete", "warning")
             return
         
         if messagebox.askyesno("Confirm Delete", "Are you sure you want to delete this object?"):
@@ -637,7 +702,8 @@ class GameObjectEditor:
                 self.custom_props_text.delete(1.0, tk.END)
                 self.sprite_listbox.delete(0, tk.END)
                 # Automatically save to clean up the file
-                self.save_config()
+                self.save_config(show_message=True)
+                self.log_status("Object deleted", "success")
     
     def highlight_sprite(self):
         """Highlight all sprites in the array on the sprite sheet"""
@@ -689,7 +755,7 @@ class GameObjectEditor:
     def on_sprite_click(self, event):
         """Handle click on sprite sheet to set coordinates"""
         if not self.current_object:
-            messagebox.showinfo("No Selection", "Please select a game object first")
+            self.log_status("Please select a game object first", "warning")
             return
         
         if not self.sprite_sheet_image:
@@ -713,9 +779,7 @@ class GameObjectEditor:
         max_tiles_y = self.original_sprite_image.height // self.tile_size
         
         if tile_x >= max_tiles_x or tile_y >= max_tiles_y:
-            messagebox.showwarning("Out of Bounds", 
-                                  f"Coordinates ({tile_x}, {tile_y}) are outside the sprite sheet bounds.\n"
-                                  f"Max coordinates: ({max_tiles_x-1}, {max_tiles_y-1})")
+            self.log_status(f"Coordinates ({tile_x}, {tile_y}) are outside bounds (max: {max_tiles_x-1}, {max_tiles_y-1})", "warning")
             return
         
         # Store clicked coordinates for adding to sprite array
@@ -738,12 +802,16 @@ class GameObjectEditor:
             # Automatically set sprite_sheet property to current sheet
             self.current_object["sprite_sheet"] = self.current_sprite_sheet
             self.load_object_to_form()  # Refresh the form
+            # Auto-save after adding sprite
+            self._save_current_object_changes()
         elif response is False:
             # Replace all sprites
             self.current_object["sprites"] = [{"x": tile_x, "y": tile_y}]
             # Automatically set sprite_sheet property to current sheet
             self.current_object["sprite_sheet"] = self.current_sprite_sheet
             self.load_object_to_form()  # Refresh the form
+            # Auto-save after replacing sprites
+            self._save_current_object_changes()
         
         # Redraw highlight
         self.highlight_sprite()
@@ -753,13 +821,13 @@ class GameObjectEditor:
             print(f"✓ {'Added' if response else 'Set'} sprite coordinates ({tile_x}, {tile_y}) for '{self.current_object.get('name', 'object')}'")
     
     def save_all(self):
-        """Save current object changes and then save config to file"""
+        """Save current object changes and then save config to file (auto-save)"""
         # First, save current object changes if an object is selected
         if self.current_object:
             try:
                 self._save_current_object_changes()
             except Exception as e:
-                messagebox.showerror("Error", f"Failed to save object changes: {e}")
+                self.log_status(f"Failed to save object changes: {e}", "error")
                 return
         
         # Then save the config file
@@ -783,8 +851,8 @@ class GameObjectEditor:
                     if val != self.current_sprite_sheet and val in self.sprite_sheet_combo['values']:
                         self.sprite_sheet_var.set(val)
                         self.on_sprite_sheet_change()
-                else:
-                    self.current_object.pop("sprite_sheet", None)  # Remove if empty
+                # Don't remove sprite_sheet if it exists - preserve it even if form field is empty
+                # Only update if a new value is provided
             elif dtype == bool:
                 self.current_object[key] = var.get()
             elif dtype == int:
@@ -803,10 +871,13 @@ class GameObjectEditor:
                 sprites.append({"x": int(match.group(1)), "y": int(match.group(2))})
         self.current_object["sprites"] = sprites
         
-        # Remove legacy fields if sprites array exists
-        if sprites:
+        # Remove legacy fields if sprites array exists and has items
+        if sprites and len(sprites) > 0:
             self.current_object.pop("sprite_x", None)
             self.current_object.pop("sprite_y", None)
+        
+        # Preserve sprite_sheet if it exists - don't remove it
+        # It will be updated by the form field if changed, but won't be removed
         
         # Update custom properties
         props_text = self.custom_props_text.get(1.0, tk.END).strip()
@@ -821,13 +892,20 @@ class GameObjectEditor:
         
         # Refresh the object list to show updated name
         self.refresh_object_list()
+        
+        # Auto-save after updating object
+        self.save_config()
     
     def save_object(self):
         """Save current object changes (kept for backward compatibility, now calls save_all)"""
         self.save_all()
     
-    def save_config(self):
-        """Save config to file with proper formatting"""
+    def save_config(self, show_message=False):
+        """Save config to file with proper formatting
+        
+        Args:
+            show_message: If True, show success message. Default False for auto-save.
+        """
         try:
             # Clean up the config structure before saving
             # Ensure all objects have proper structure
@@ -844,6 +922,13 @@ class GameObjectEditor:
                         elif hasattr(sprite, 'x') and hasattr(sprite, 'y'):
                             cleaned_sprites.append({"x": sprite.x, "y": sprite.y})
                     obj["sprites"] = cleaned_sprites
+                
+                # Preserve all existing fields - don't remove sprite_sheet, properties, etc.
+                # Only clean up legacy sprite_x/sprite_y if sprites array exists
+                if obj.get("sprites") and len(obj.get("sprites", [])) > 0:
+                    # Remove legacy fields only if we have sprites array
+                    obj.pop("sprite_x", None)
+                    obj.pop("sprite_y", None)
             
             # Write with proper formatting
             with open(self.config_path, 'w') as f:
@@ -854,14 +939,15 @@ class GameObjectEditor:
                 with open(self.config_path, 'r') as f:
                     toml.load(f)  # Validate it can be parsed
             except Exception as e:
-                messagebox.showwarning("Warning", f"Config saved but validation failed: {e}")
+                self.log_status(f"Config saved but validation failed: {e}", "warning")
                 return
             
-            messagebox.showinfo("Success", f"Config saved to {self.config_path}")
+            if show_message:
+                self.log_status(f"Config saved to {self.config_path.name}", "success")
             # Update server status after saving
             self.root.after(500, self.check_server_status)
         except Exception as e:
-            messagebox.showerror("Error", f"Failed to save config: {e}")
+            self.log_status(f"Failed to save config: {e}", "error")
     
     def find_server_process(self):
         """Find the running server process"""
@@ -968,7 +1054,7 @@ class GameObjectEditor:
                 
                 if build_process.returncode != 0:
                     error_msg = stderr.decode('utf-8', errors='ignore') if stderr else "Build failed"
-                    messagebox.showerror("Build Error", f"Failed to build server:\n{error_msg}")
+                    self.log_status(f"Build failed: {error_msg[:100]}", "error")
                     return False
             
             # Always use cargo run to ensure we get the latest code
@@ -1008,7 +1094,7 @@ class GameObjectEditor:
                 self.root.update()
                 
                 if not self.kill_server_process(pid):
-                    messagebox.showerror("Error", "Failed to stop the server")
+                    self.log_status("Failed to stop the server", "error")
                     self.check_server_status()
                     return
                 
@@ -1036,15 +1122,15 @@ class GameObjectEditor:
                 # Check if server actually started
                 final_check = self.find_server_process()
                 if final_check:
-                    messagebox.showinfo("Success", "Server restarted successfully!")
+                    self.log_status("Server restarted successfully", "success")
                 else:
                     self.server_status_label.config(text="Server: Failed", foreground="red")
-                    messagebox.showerror("Error", "Server process started but may have crashed. Check terminal for errors.")
+                    self.log_status("Server process started but may have crashed. Check terminal for errors.", "error")
             else:
                 self.server_status_label.config(text="Server: Error", foreground="red")
-                messagebox.showerror("Error", "Failed to start the server. Check terminal for errors.")
+                self.log_status("Failed to start the server. Check terminal for errors.", "error")
         except Exception as e:
-            messagebox.showerror("Error", f"Failed to restart server: {e}")
+            self.log_status(f"Failed to restart server: {e}", "error")
             self.check_server_status()
 
 def main():

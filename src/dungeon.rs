@@ -11,7 +11,16 @@ pub struct Dungeon {
 
 impl Dungeon {
     pub fn new_with_registry(width: usize, height: usize, registry: &TileRegistry) -> Self {
-        let mut tiles = vec![vec![registry.get_wall_dirt_top(); width]; height];
+        // Get all wall tiles from registry, default to wall_dirt_top if none found
+        let wall_tiles = registry.get_wall_tiles();
+        let default_wall = if wall_tiles.is_empty() {
+            registry.get_wall_dirt_top()
+        } else {
+            // Use first wall tile as default
+            wall_tiles[0].clone()
+        };
+        
+        let mut tiles = vec![vec![default_wall; width]; height];
         Self::generate_rooms(&mut tiles, width, height, registry);
         Self { width, height, tiles }
     }
@@ -41,19 +50,29 @@ impl Dungeon {
             }
 
             if !overlaps {
-                // Carve out room with random floor variations
-                // Each tile will randomize its sprite from the GameObject's sprite array
-                let floor_tiles = vec![
-                    registry.get_floor_dark(),
-                    registry.get_floor_stone(),  // This has multiple sprites that randomize
-                ];
-                for dy in 0..room_height {
-                    for dx in 0..room_width {
-                        let floor_idx = rng.gen_range(0..floor_tiles.len());
-                        let mut tile = floor_tiles[floor_idx].clone();
-                        // Randomize sprite if tile has multiple sprites
-                        tile.randomize_sprite();
-                        tiles[y + dy][x + dx] = tile;
+                // Carve out room using all walkable tiles from registry
+                let floor_tiles = registry.get_walkable_tiles();
+                
+                if !floor_tiles.is_empty() {
+                    for dy in 0..room_height {
+                        for dx in 0..room_width {
+                            // Randomly select from all available floor tiles
+                            let floor_idx = rng.gen_range(0..floor_tiles.len());
+                            let mut tile = floor_tiles[floor_idx].clone();
+                            // Randomize sprite if tile has multiple sprites
+                            tile.randomize_sprite();
+                            tiles[y + dy][x + dx] = tile;
+                        }
+                    }
+                } else {
+                    // Fallback: use default floor if no walkable tiles found
+                    let mut default_floor = registry.get_floor_dark();
+                    default_floor.randomize_sprite();
+                    for dy in 0..room_height {
+                        for dx in 0..room_width {
+                            tiles[y + dy][x + dx] = default_floor.clone();
+                            tiles[y + dy][x + dx].randomize_sprite();
+                        }
                     }
                 }
                 rooms.push(room);
@@ -70,11 +89,13 @@ impl Dungeon {
             let center2_x = x2 + w2 / 2;
             let center2_y = y2 + h2 / 2;
 
-            // L-shaped corridor
-            let floor_tiles = vec![
-                registry.get_floor_dark(),
-                registry.get_floor_stone(),  // This has multiple sprites that randomize
-            ];
+            // L-shaped corridor using all walkable tiles from registry
+            let floor_tiles = registry.get_walkable_tiles();
+            let default_floor = if floor_tiles.is_empty() {
+                registry.get_floor_dark()
+            } else {
+                floor_tiles[0].clone()
+            };
             
             if rng.gen_bool(0.5) {
                 // Horizontal then vertical
@@ -82,8 +103,12 @@ impl Dungeon {
                 let end_x = center1_x.max(center2_x);
                 for x in start_x..=end_x {
                     if center1_y < tiles.len() && x < tiles[0].len() {
-                        let floor_idx = rng.gen_range(0..floor_tiles.len());
-                        let mut tile = floor_tiles[floor_idx].clone();
+                        let mut tile = if !floor_tiles.is_empty() {
+                            let floor_idx = rng.gen_range(0..floor_tiles.len());
+                            floor_tiles[floor_idx].clone()
+                        } else {
+                            default_floor.clone()
+                        };
                         tile.randomize_sprite();
                         tiles[center1_y][x] = tile;
                     }
@@ -92,8 +117,12 @@ impl Dungeon {
                 let end_y = center1_y.max(center2_y);
                 for y in start_y..=end_y {
                     if y < tiles.len() && center2_x < tiles[0].len() {
-                        let floor_idx = rng.gen_range(0..floor_tiles.len());
-                        let mut tile = floor_tiles[floor_idx].clone();
+                        let mut tile = if !floor_tiles.is_empty() {
+                            let floor_idx = rng.gen_range(0..floor_tiles.len());
+                            floor_tiles[floor_idx].clone()
+                        } else {
+                            default_floor.clone()
+                        };
                         tile.randomize_sprite();
                         tiles[y][center2_x] = tile;
                     }
@@ -104,8 +133,12 @@ impl Dungeon {
                 let end_y = center1_y.max(center2_y);
                 for y in start_y..=end_y {
                     if y < tiles.len() && center1_x < tiles[0].len() {
-                        let floor_idx = rng.gen_range(0..floor_tiles.len());
-                        let mut tile = floor_tiles[floor_idx].clone();
+                        let mut tile = if !floor_tiles.is_empty() {
+                            let floor_idx = rng.gen_range(0..floor_tiles.len());
+                            floor_tiles[floor_idx].clone()
+                        } else {
+                            default_floor.clone()
+                        };
                         tile.randomize_sprite();
                         tiles[y][center1_x] = tile;
                     }
@@ -114,8 +147,12 @@ impl Dungeon {
                 let end_x = center1_x.max(center2_x);
                 for x in start_x..=end_x {
                     if center2_y < tiles.len() && x < tiles[0].len() {
-                        let floor_idx = rng.gen_range(0..floor_tiles.len());
-                        let mut tile = floor_tiles[floor_idx].clone();
+                        let mut tile = if !floor_tiles.is_empty() {
+                            let floor_idx = rng.gen_range(0..floor_tiles.len());
+                            floor_tiles[floor_idx].clone()
+                        } else {
+                            default_floor.clone()
+                        };
                         tile.randomize_sprite();
                         tiles[center2_y][x] = tile;
                     }
