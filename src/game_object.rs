@@ -20,6 +20,9 @@ pub struct GameObject {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub monster: Option<bool>,  // Whether this character is a monster
     #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub healing_power: Option<u32>,  // Healing power for consumables
+    #[serde(default)]
     pub sprites: Vec<SpriteCoord>,  // Array of sprite coordinates for randomization
     // Legacy fields for backward compatibility
     #[serde(default)]
@@ -52,6 +55,7 @@ impl GameObject {
             health: None,
             attack: None,
             monster: None,
+            healing_power: None,
             sprites: vec![SpriteCoord { x: sprite_x, y: sprite_y }],
             sprite_x: Some(sprite_x),
             sprite_y: Some(sprite_y),

@@ -40,6 +40,14 @@ pub struct Entity {
     pub facing_right: bool,  // true = facing right, false = facing left
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Consumable {
+    pub id: String,  // Unique consumable ID
+    pub x: usize,
+    pub y: usize,
+    pub object_id: String,  // Reference to GameObject
+}
+
 impl Entity {
     pub fn new(
         id: String,
@@ -85,6 +93,7 @@ impl Entity {
 pub struct GameState {
     pub dungeon: Dungeon,
     pub entities: Vec<Entity>,  // All entities (player + AI)
+    pub consumables: Vec<Consumable>,  // All consumables on the map
     #[allow(dead_code)]
     pub tile_registry: TileRegistry,
     pub object_registry: GameObjectRegistry,
@@ -185,9 +194,72 @@ impl GameState {
         } else {
         }
         
+        // Spawn consumables
+        let mut consumables = Vec::new();
+        let consumable_templates: Vec<&crate::game_object::GameObject> = object_registry.get_all_objects()
+            .into_iter()
+            .filter(|obj| obj.object_type == "consumable")
+            .collect();
+        
+        if !consumable_templates.is_empty() {
+            use rand::Rng;
+            let mut rng = rand::thread_rng();
+            let mut consumable_id_counter = 0;
+            
+            // Spawn 1-2 consumables per room
+            for room in &dungeon.rooms {
+                let num_consumables = rng.gen_range(1..=2);
+                for _ in 0..num_consumables {
+                    // Find a random walkable position within the room
+                    let mut valid_positions = Vec::new();
+                    for dy in 0..room.height {
+                        for dx in 0..room.width {
+                            let x = room.x + dx;
+                            let y = room.y + dy;
+                            if x < dungeon.width && y < dungeon.height {
+                                if dungeon.tiles[y][x].walkable {
+                                    // Check if position is not occupied by player
+                                    if !(x == player_x && y == player_y) {
+                                        // Check if position is not occupied by another entity
+                                        let occupied_by_entity = entities.iter().any(|e| e.x == x && e.y == y);
+                                        // Check if position is not occupied by stairs
+                                        let occupied_by_stairs = stairs_pos.map_or(false, |(sx, sy)| sx == x && sy == y);
+                                        // Check if position is not already occupied by a consumable
+                                        let occupied_by_consumable = consumables.iter().any(|c: &Consumable| c.x == x && c.y == y);
+                                        if !occupied_by_entity && !occupied_by_stairs && !occupied_by_consumable {
+                                            valid_positions.push((x, y));
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    
+                    // Spawn consumable if we have valid positions
+                    if !valid_positions.is_empty() {
+                        let pos_idx = rng.gen_range(0..valid_positions.len());
+                        let (consumable_x, consumable_y) = valid_positions[pos_idx];
+                        
+                        // Select a random consumable template
+                        let consumable_template = consumable_templates[rng.gen_range(0..consumable_templates.len())];
+                        
+                        let consumable = Consumable {
+                            id: format!("consumable_{}", consumable_id_counter),
+                            x: consumable_x,
+                            y: consumable_y,
+                            object_id: consumable_template.id.clone(),
+                        };
+                        consumables.push(consumable);
+                        consumable_id_counter += 1;
+                    }
+                }
+            }
+        }
+        
         Self {
             dungeon,
             entities,
+            consumables,
             tile_registry,
             object_registry,
             stairs_position: stairs_pos,
@@ -333,9 +405,36 @@ impl GameState {
                     // No enemy, try to move
                     self.move_entity(idx, dx, dy);
                     
-                    // Check if player stepped on stairs
+                    // Check if player stepped on a consumable
                     let new_x = self.entities[idx].x;
                     let new_y = self.entities[idx].y;
+                    if let Some(consumable_idx) = self.consumables.iter().position(|c| c.x == new_x && c.y == new_y) {
+                        // Player stepped on a consumable - consume it
+                        let consumable = &self.consumables[consumable_idx];
+                        if let Some(consumable_obj) = self.object_registry.get_object(&consumable.object_id) {
+                            if let Some(healing_power) = consumable_obj.healing_power {
+                                // Heal the player
+                                let old_health = self.entities[idx].current_health;
+                                self.entities[idx].heal(healing_power);
+                                let new_health = self.entities[idx].current_health;
+                                let healed_amount = new_health - old_health;
+                                
+                                // Create a healing message (use damage field to store healed amount for client display)
+                                messages.push(CombatMessage {
+                                    attacker: consumable_obj.name.clone(),
+                                    target: self.entities[idx].id.clone(),
+                                    damage: healed_amount,  // Store healed amount here for client
+                                    target_health_after: new_health,
+                                    target_died: false,
+                                });
+                                
+                                // Remove the consumable
+                                self.consumables.remove(consumable_idx);
+                            }
+                        }
+                    }
+                    
+                    // Check if player stepped on stairs
                     if let Some((stairs_x, stairs_y)) = self.stairs_position {
                         if new_x == stairs_x && new_y == stairs_y {
                             // Player stepped on stairs - they need to confirm
@@ -472,6 +571,68 @@ impl GameState {
             .map(|e| (e.x, e.y))
             .unwrap_or((player_x, player_y));
         self.stairs_position = Self::place_stairs(&self.dungeon, first_player_pos.0, first_player_pos.1, &self.object_registry);
+        
+        // Spawn consumables
+        let consumable_templates: Vec<&crate::game_object::GameObject> = self.object_registry.get_all_objects()
+            .into_iter()
+            .filter(|obj| obj.object_type == "consumable")
+            .collect();
+        
+        self.consumables.clear();
+        if !consumable_templates.is_empty() {
+            use rand::Rng;
+            let mut rng = rand::thread_rng();
+            let mut consumable_id_counter = 0;
+            
+            // Spawn 1-2 consumables per room
+            for room in &self.dungeon.rooms {
+                let num_consumables = rng.gen_range(1..=2);
+                for _ in 0..num_consumables {
+                    // Find a random walkable position within the room
+                    let mut valid_positions = Vec::new();
+                    for dy in 0..room.height {
+                        for dx in 0..room.width {
+                            let x = room.x + dx;
+                            let y = room.y + dy;
+                            if x < self.dungeon.width && y < self.dungeon.height {
+                                if self.dungeon.tiles[y][x].walkable {
+                                    // Check if position is not occupied by player
+                                    if !(x == player_x && y == player_y) {
+                                        // Check if position is not occupied by another entity
+                                        let occupied_by_entity = self.entities.iter().any(|e| e.x == x && e.y == y);
+                                        // Check if position is not occupied by stairs
+                                        let occupied_by_stairs = self.stairs_position.map_or(false, |(sx, sy)| sx == x && sy == y);
+                                        // Check if position is not already occupied by a consumable
+                                        let occupied_by_consumable = self.consumables.iter().any(|c: &Consumable| c.x == x && c.y == y);
+                                        if !occupied_by_entity && !occupied_by_stairs && !occupied_by_consumable {
+                                            valid_positions.push((x, y));
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    
+                    // Spawn consumable if we have valid positions
+                    if !valid_positions.is_empty() {
+                        let pos_idx = rng.gen_range(0..valid_positions.len());
+                        let (consumable_x, consumable_y) = valid_positions[pos_idx];
+                        
+                        // Select a random consumable template
+                        let consumable_template = consumable_templates[rng.gen_range(0..consumable_templates.len())];
+                        
+                        let consumable = Consumable {
+                            id: format!("consumable_{}", consumable_id_counter),
+                            x: consumable_x,
+                            y: consumable_y,
+                            object_id: consumable_template.id.clone(),
+                        };
+                        self.consumables.push(consumable);
+                        consumable_id_counter += 1;
+                    }
+                }
+            }
+        }
     }
     
     pub fn confirm_stairs(&mut self, player_id: &str) -> bool {

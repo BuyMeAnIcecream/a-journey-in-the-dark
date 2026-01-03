@@ -40,9 +40,21 @@ struct EntityData {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
+struct ConsumableData {
+    id: String,
+    object_id: String,
+    x: usize,
+    y: usize,
+    sprite_x: u32,
+    sprite_y: u32,
+    sprite_sheet: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
 struct GameUpdate {
     map: Vec<Vec<crate::tile::Tile>>,
     entities: Vec<EntityData>,  // All entities (player + AI)
+    consumables: Vec<ConsumableData>,  // All consumables on the map
     width: usize,
     height: usize,
     messages: Vec<CombatMessage>,  // Combat messages for this update
@@ -88,6 +100,7 @@ async fn main() {
         .route("/ws", get(websocket_handler))
         .route("/api/map", get(generate_map_endpoint))
         .nest_service("/assets", ServeDir::new("assets"))
+        .nest_service("/client", ServeDir::new("client"))
         .with_state((state, tx));
 
     let listener = match tokio::net::TcpListener::bind("0.0.0.0:3000").await {
@@ -157,6 +170,27 @@ async fn generate_map_endpoint() -> Json<GameUpdate> {
         })
         .collect();
     
+    // Convert consumables to ConsumableData
+    let consumables: Vec<ConsumableData> = game_state.consumables.iter()
+        .map(|consumable| {
+            let obj = game_state.object_registry.get_object(&consumable.object_id);
+            let (sprite_x, sprite_y) = obj
+                .and_then(|o| o.get_sprites_vec().first().map(|s| (s.x, s.y)))
+                .unwrap_or((0, 0));
+            let sprite_sheet = obj.and_then(|o| o.sprite_sheet.clone());
+            
+            ConsumableData {
+                id: consumable.id.clone(),
+                object_id: consumable.object_id.clone(),
+                x: consumable.x,
+                y: consumable.y,
+                sprite_x,
+                sprite_y,
+                sprite_sheet,
+            }
+        })
+        .collect();
+    
     // Check if preview player is on stairs
     let on_stairs = game_state.stairs_position.map_or(false, |(sx, sy)| {
         game_state.entities.iter().any(|e| e.id == preview_player_id && e.x == sx && e.y == sy)
@@ -165,6 +199,7 @@ async fn generate_map_endpoint() -> Json<GameUpdate> {
     Json(GameUpdate {
         map: game_state.dungeon.tiles.clone(),
         entities,
+        consumables,
         width: game_state.dungeon.width,
         height: game_state.dungeon.height,
         messages: Vec::new(),
@@ -229,6 +264,27 @@ async fn handle_socket(socket: WebSocket, state: SharedState, tx: Tx) {
             })
             .collect();
         
+        // Convert consumables to ConsumableData
+        let consumables: Vec<ConsumableData> = game.consumables.iter()
+            .map(|consumable| {
+                let obj = game.object_registry.get_object(&consumable.object_id);
+                let (sprite_x, sprite_y) = obj
+                    .and_then(|o| o.get_sprites_vec().first().map(|s| (s.x, s.y)))
+                    .unwrap_or((0, 0));
+                let sprite_sheet = obj.and_then(|o| o.sprite_sheet.clone());
+                
+                ConsumableData {
+                    id: consumable.id.clone(),
+                    object_id: consumable.object_id.clone(),
+                    x: consumable.x,
+                    y: consumable.y,
+                    sprite_x,
+                    sprite_y,
+                    sprite_sheet,
+                }
+            })
+            .collect();
+        
         // Check if current player is on stairs
         let on_stairs = game.stairs_position.map_or(false, |(sx, sy)| {
             game.entities.iter().any(|e| e.id == player_id && e.x == sx && e.y == sy)
@@ -237,6 +293,7 @@ async fn handle_socket(socket: WebSocket, state: SharedState, tx: Tx) {
         let update = GameUpdate {
             map: game.dungeon.tiles.clone(),
             entities,
+            consumables,
             width: game.dungeon.width,
             height: game.dungeon.height,
             messages: Vec::new(),  // No messages on initial state
@@ -301,6 +358,27 @@ async fn handle_socket(socket: WebSocket, state: SharedState, tx: Tx) {
                     })
                     .collect();
                 
+                // Convert consumables to ConsumableData
+                let consumables: Vec<ConsumableData> = game.consumables.iter()
+                    .map(|consumable| {
+                        let obj = game.object_registry.get_object(&consumable.object_id);
+                        let (sprite_x, sprite_y) = obj
+                            .and_then(|o| o.get_sprites_vec().first().map(|s| (s.x, s.y)))
+                            .unwrap_or((0, 0));
+                        let sprite_sheet = obj.and_then(|o| o.sprite_sheet.clone());
+                        
+                        ConsumableData {
+                            id: consumable.id.clone(),
+                            object_id: consumable.object_id.clone(),
+                            x: consumable.x,
+                            y: consumable.y,
+                            sprite_x,
+                            sprite_y,
+                            sprite_sheet,
+                        }
+                    })
+                    .collect();
+                
                 let messages = combat_messages;
                 let all_players_dead = game.are_all_players_dead();
                 
@@ -312,6 +390,7 @@ async fn handle_socket(socket: WebSocket, state: SharedState, tx: Tx) {
                 let update = serde_json::to_string(&GameUpdate {
                     map: game.dungeon.tiles.clone(),
                     entities,
+                    consumables,
                     width: game.dungeon.width,
                     height: game.dungeon.height,
                     messages,
@@ -430,8 +509,45 @@ fn create_default_config() -> config::GameConfig {
     )
     .with_health(100);
     player.sprite_sheet = Some("rogues.png".to_string());
-    player.properties.insert("attack".to_string(), "10".to_string());
+    player.attack = Some(10);
     objects.push(player);
+    
+    // Orc monster
+    let mut orc = GameObject::new(
+        "orc".to_string(),
+        "Orc".to_string(),
+        "character".to_string(),
+        true,
+        0, 0,  // Default sprite - should be set via editor
+    )
+    .with_health(50);
+    orc.sprite_sheet = Some("rogues.png".to_string());
+    orc.attack = Some(5);
+    orc.monster = Some(true);
+    objects.push(orc);
+    
+    // Stairs (goal)
+    let mut stairs = GameObject::new(
+        "stairs".to_string(),
+        "Stairs Down".to_string(),
+        "goal".to_string(),
+        true,
+        7, 16,  // Stairs sprite coordinates
+    );
+    stairs.sprite_sheet = Some("tiles.png".to_string());
+    objects.push(stairs);
+    
+    // Health potion (consumable)
+    let mut health_potion = GameObject::new(
+        "health_potion".to_string(),
+        "Health Potion".to_string(),
+        "consumable".to_string(),
+        true,
+        0, 0,  // Default sprite - should be set via editor
+    );
+    health_potion.sprite_sheet = Some("tiles.png".to_string());
+    health_potion.healing_power = Some(20);
+    objects.push(health_potion);
     
     config::GameConfig { game_objects: objects }
 }

@@ -97,3 +97,16 @@ x = 7
 y = 16
 
 
+[[game_objects]]
+id = "lesser_potion"
+name = "Lesser Potion"
+object_type = "consumable"
+walkable = false
+monster = false
+healing_power = 20
+sprite_sheet = "items.png"
+[[game_objects.sprites]]
+x = 2
+y = 20
+
+

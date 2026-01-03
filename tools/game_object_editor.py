@@ -151,6 +151,7 @@ class GameObjectEditor:
             "health": ("Health:", "health", int, False, ["character", "item"]),  # For entities
             "attack": ("Attack:", "attack", int, False, ["character", "item"]),  # For entities
             "monster": ("Monster:", "monster", bool, False, ["character"]),  # Only for characters
+            "healing_power": ("Healing Power:", "healing_power", int, False, ["consumable"]),  # Only for consumables
             "sprite_sheet": ("Sprite Sheet:", "sprite_sheet", str, True, []),  # Always show
         }
         
@@ -195,7 +196,7 @@ class GameObjectEditor:
         if "object_type" in self.prop_widgets:
             self.prop_widgets["object_type"].grid_remove()
         type_combo = ttk.Combobox(middle_panel, textvariable=self.prop_vars["object_type"][0], 
-                                  values=["tile", "character", "item", "goal"], width=17)
+                                  values=["tile", "character", "item", "goal", "consumable"], width=17)
         type_combo.grid(row=2, column=1, sticky=(tk.W, tk.E), pady=5)
         type_combo.bind("<<ComboboxSelected>>", lambda e: self._on_object_type_changed())
         # Update the widget reference to point to the Combobox
