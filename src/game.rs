@@ -95,45 +95,10 @@ impl GameState {
             }
         }
         
-        // Get player object ID from registry, or use default
-        let player_obj = object_registry
-            .get_objects_by_type("character")
-            .first()
-            .copied()
-            .or_else(|| object_registry.get_object("player"));
-        
         let mut entities = Vec::new();
         
-        // Create player entity
-        if let Some(player_template) = player_obj {
-            let max_health = player_template.health.unwrap_or(100);
-            let attack = player_template.attack
-                .or_else(|| {
-                    player_template.properties
-                        .get("attack")
-                        .and_then(|s| s.parse::<i32>().ok())
-                })
-                .unwrap_or(10);
-            
-            println!("Creating player entity: id={}, sprite_sheet={:?}, sprites={:?}", 
-                player_template.id, 
-                player_template.sprite_sheet,
-                player_template.get_sprites_vec());
-            
-            let player = Entity::new(
-                "player".to_string(),
-                player_x,
-                player_y,
-                player_template.id.clone(),
-                attack,
-                max_health,
-                EntityController::Player,
-            );
-            entities.push(player);
-            println!("Player spawned at ({}, {})", player_x, player_y);
-        } else {
-            println!("WARNING: No player object found in registry!");
-        }
+        // Don't create a default player entity - players will be added when they connect
+        println!("Game state initialized. Players will spawn when they connect.");
         
         // Spawn monsters in each room
         let monster_templates = object_registry.get_monster_characters();
@@ -156,7 +121,7 @@ impl GameState {
                                 // Check if position is not occupied by player
                                 if !(x == player_x && y == player_y) {
                                     // Check if position is not occupied by another entity
-                                    let occupied = entities.iter().any(|e| e.x == x && e.y == y);
+                                    let occupied = entities.iter().any(|e: &Entity| e.x == x && e.y == y);
                                     if !occupied {
                                         valid_positions.push((x, y));
                                     }
@@ -220,9 +185,9 @@ impl GameState {
         self.entities.iter_mut().find(|e| e.controller == EntityController::Player)
     }
 
-    pub fn handle_command(&mut self, cmd: &PlayerCommand) {
-        // Find player entity index
-        let player_idx = self.entities.iter().position(|e| e.controller == EntityController::Player);
+    pub fn handle_command(&mut self, cmd: &PlayerCommand, player_id: &str) {
+        // Find the specific player entity by ID
+        let player_idx = self.entities.iter().position(|e| e.id == player_id && e.controller == EntityController::Player);
         
         if let Some(idx) = player_idx {
             let (dx, dy) = match cmd.action.as_str() {
@@ -234,6 +199,100 @@ impl GameState {
             };
             
             self.move_entity(idx, dx, dy);
+        }
+    }
+    
+    pub fn add_player(&mut self, player_id: String) -> Option<usize> {
+        // Get player object template from registry - must have id "player"
+        let player_obj = self.object_registry.get_object("player");
+        
+        if let Some(player_template) = player_obj {
+            // Find spawn position: next to first player if exists, otherwise first walkable tile
+            let mut spawn_x = 1;
+            let mut spawn_y = 1;
+            let mut found = false;
+            
+            // First, try to find an existing player to spawn next to
+            if let Some(first_player) = self.entities.iter().find(|e| e.controller == EntityController::Player && e.is_alive()) {
+                // Try to spawn adjacent to the first player
+                let adjacent_positions = [
+                    (first_player.x.wrapping_sub(1), first_player.y),     // Left
+                    (first_player.x + 1, first_player.y),                // Right
+                    (first_player.x, first_player.y.wrapping_sub(1)),    // Up
+                    (first_player.x, first_player.y + 1),                // Down
+                ];
+                
+                for (x, y) in adjacent_positions.iter() {
+                    if *x < self.dungeon.width && *y < self.dungeon.height {
+                        if self.dungeon.tiles[*y][*x].walkable {
+                            // Check if position is occupied
+                            let occupied = self.entities.iter().any(|e: &Entity| e.x == *x && e.y == *y && e.is_alive());
+                            if !occupied {
+                                spawn_x = *x;
+                                spawn_y = *y;
+                                found = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+            
+            // If we didn't find a spot next to first player, find first available walkable tile
+            if !found {
+                for y in 0..self.dungeon.height {
+                    for x in 0..self.dungeon.width {
+                        if self.dungeon.tiles[y][x].walkable {
+                            // Check if position is occupied
+                            let occupied = self.entities.iter().any(|e: &Entity| e.x == x && e.y == y && e.is_alive());
+                            if !occupied {
+                                spawn_x = x;
+                                spawn_y = y;
+                                found = true;
+                                break;
+                            }
+                        }
+                    }
+                    if found {
+                        break;
+                    }
+                }
+            }
+            
+            let max_health = player_template.health.unwrap_or(100);
+            let attack = player_template.attack
+                .or_else(|| {
+                    player_template.properties
+                        .get("attack")
+                        .and_then(|s| s.parse::<i32>().ok())
+                })
+                .unwrap_or(10);
+            
+            let player = Entity::new(
+                player_id,
+                spawn_x,
+                spawn_y,
+                player_template.id.clone(),
+                attack,
+                max_health,
+                EntityController::Player,
+            );
+            
+            let idx = self.entities.len();
+            self.entities.push(player);
+            println!("Added new player entity at ({}, {})", spawn_x, spawn_y);
+            Some(idx)
+        } else {
+            println!("WARNING: No player object found in registry!");
+            None
+        }
+    }
+    
+    pub fn remove_player(&mut self, player_id: &str) {
+        // Remove player entity (or mark as dead)
+        if let Some(idx) = self.entities.iter().position(|e| e.id == player_id && e.controller == EntityController::Player) {
+            self.entities[idx].current_health = 0; // Mark as dead
+            println!("Removed player entity: {}", player_id);
         }
     }
     

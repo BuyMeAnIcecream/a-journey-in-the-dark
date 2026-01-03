@@ -113,11 +113,23 @@ async fn websocket_handler(
 async fn handle_socket(socket: WebSocket, state: SharedState, tx: Tx) {
     let (mut sender, mut receiver) = socket.split();
     let mut rx = tx.subscribe();
+    
+    // Generate unique player ID for this connection
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static PLAYER_COUNTER: AtomicU64 = AtomicU64::new(0);
+    let player_id = format!("player_{}", PLAYER_COUNTER.fetch_add(1, Ordering::Relaxed));
+    
+    // Add new player entity to game state
+    {
+        let mut game = state.lock().unwrap();
+        game.add_player(player_id.clone());
+        println!("New player connected: {}", player_id);
+    }
 
     // Send initial game state
     let initial_state = {
         let game = state.lock().unwrap();
-        println!("Sending game state: {} entities", game.entities.len());
+        println!("Sending game state to {}: {} entities", player_id, game.entities.len());
         // Convert entities to EntityData
         let entities: Vec<EntityData> = game.entities.iter()
             .filter(|e| e.is_alive())  // Only send alive entities
@@ -167,11 +179,12 @@ async fn handle_socket(socket: WebSocket, state: SharedState, tx: Tx) {
     });
 
     // Spawn task to receive messages from client
+    let player_id_clone = player_id.clone();
     let mut recv_task = tokio::spawn(async move {
         while let Some(Ok(Message::Text(text))) = receiver.next().await {
             if let Ok(cmd) = serde_json::from_str::<PlayerCommand>(&text) {
                 let mut game = state.lock().unwrap();
-                game.handle_command(&cmd);
+                game.handle_command(&cmd, &player_id_clone);
                 
                 // Broadcast update
                 // Convert entities to EntityData
