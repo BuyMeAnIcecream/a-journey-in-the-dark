@@ -50,18 +50,35 @@ impl Dungeon {
             }
 
             if !overlaps {
-                // Carve out room using all walkable tiles from registry
+                // Carve out oval/elliptical room using all walkable tiles from registry
                 let floor_tiles = registry.get_walkable_tiles();
                 
+                // Calculate ellipse center and radii
+                let center_x = x as f32 + room_width as f32 / 2.0;
+                let center_y = y as f32 + room_height as f32 / 2.0;
+                let radius_x = room_width as f32 / 2.0;
+                let radius_y = room_height as f32 / 2.0;
+                
+                // Carve out oval shape
                 if !floor_tiles.is_empty() {
                     for dy in 0..room_height {
                         for dx in 0..room_width {
-                            // Randomly select from all available floor tiles
-                            let floor_idx = rng.gen_range(0..floor_tiles.len());
-                            let mut tile = floor_tiles[floor_idx].clone();
-                            // Randomize sprite if tile has multiple sprites
-                            tile.randomize_sprite();
-                            tiles[y + dy][x + dx] = tile;
+                            // Check if point is inside ellipse: ((x-cx)^2/rx^2) + ((y-cy)^2/ry^2) <= 1
+                            let px = x as f32 + dx as f32 + 0.5;
+                            let py = y as f32 + dy as f32 + 0.5;
+                            let dx_norm = (px - center_x) / radius_x;
+                            let dy_norm = (py - center_y) / radius_y;
+                            let dist_sq = dx_norm * dx_norm + dy_norm * dy_norm;
+                            
+                            // Only carve if inside ellipse (with slight margin for smoother edges)
+                            if dist_sq <= 1.0 {
+                                // Randomly select from all available floor tiles
+                                let floor_idx = rng.gen_range(0..floor_tiles.len());
+                                let mut tile = floor_tiles[floor_idx].clone();
+                                // Randomize sprite if tile has multiple sprites
+                                tile.randomize_sprite();
+                                tiles[y + dy][x + dx] = tile;
+                            }
                         }
                     }
                 } else {
@@ -70,8 +87,17 @@ impl Dungeon {
                     default_floor.randomize_sprite();
                     for dy in 0..room_height {
                         for dx in 0..room_width {
-                            tiles[y + dy][x + dx] = default_floor.clone();
-                            tiles[y + dy][x + dx].randomize_sprite();
+                            // Check if point is inside ellipse
+                            let px = x as f32 + dx as f32 + 0.5;
+                            let py = y as f32 + dy as f32 + 0.5;
+                            let dx_norm = (px - center_x) / radius_x;
+                            let dy_norm = (py - center_y) / radius_y;
+                            let dist_sq = dx_norm * dx_norm + dy_norm * dy_norm;
+                            
+                            if dist_sq <= 1.0 {
+                                tiles[y + dy][x + dx] = default_floor.clone();
+                                tiles[y + dy][x + dx].randomize_sprite();
+                            }
                         }
                     }
                 }
