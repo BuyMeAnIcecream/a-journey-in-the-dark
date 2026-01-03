@@ -3,6 +3,15 @@ use crate::tile_registry::TileRegistry;
 use crate::game_object_registry::GameObjectRegistry;
 use serde::{Deserialize, Serialize};
 
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct CombatMessage {
+    pub attacker: String,
+    pub target: String,
+    pub damage: u32,
+    pub target_health_after: u32,
+    pub target_died: bool,
+}
+
 #[derive(Deserialize)]
 pub struct PlayerCommand {
     pub action: String,
@@ -187,7 +196,7 @@ impl GameState {
         self.entities.iter_mut().find(|e| e.controller == EntityController::Player)
     }
 
-    pub fn handle_command(&mut self, cmd: &PlayerCommand, player_id: &str) {
+    pub fn handle_command(&mut self, cmd: &PlayerCommand, player_id: &str) -> Option<CombatMessage> {
         // Find the specific player entity by ID
         let player_idx = self.entities.iter().position(|e| e.id == player_id && e.controller == EntityController::Player);
         
@@ -197,11 +206,33 @@ impl GameState {
                 "move_down" => (0, 1),
                 "move_left" => (-1, 0),
                 "move_right" => (1, 0),
-                _ => return,
+                _ => return None,
             };
             
+            // Check if there's an enemy at the target position
+            let entity = &self.entities[idx];
+            let new_x = (entity.x as i32 + dx) as usize;
+            let new_y = (entity.y as i32 + dy) as usize;
+            
+            // Check bounds
+            if new_x < self.dungeon.width && new_y < self.dungeon.height {
+                // Check if there's an enemy (AI-controlled entity) at target position
+                if let Some(target_idx) = self.entities.iter().position(|e| {
+                    e.id != entity.id && 
+                    e.x == new_x && 
+                    e.y == new_y && 
+                    e.is_alive() &&
+                    e.controller == EntityController::AI
+                }) {
+                    // Attack instead of moving
+                    return self.attack_entity(idx, target_idx);
+                }
+            }
+            
+            // No enemy, try to move
             self.move_entity(idx, dx, dy);
         }
+        None
     }
     
     pub fn add_player(&mut self, player_id: String) -> Option<usize> {
@@ -297,6 +328,46 @@ impl GameState {
         }
     }
     
+    fn attack_entity(&mut self, attacker_idx: usize, target_idx: usize) -> Option<CombatMessage> {
+        if attacker_idx >= self.entities.len() || target_idx >= self.entities.len() {
+            return None;
+        }
+        
+        // Get attacker's values before mutable borrow
+        let damage = self.entities[attacker_idx].attack.max(0) as u32;
+        let attacker_id = self.entities[attacker_idx].id.clone();
+        let attacker_x = self.entities[attacker_idx].x;
+        
+        // Apply damage to target
+        let target = &mut self.entities[target_idx];
+        let target_id = target.id.clone();
+        let target_x = target.x;
+        
+        if damage >= target.current_health {
+            target.current_health = 0;
+        } else {
+            target.current_health -= damage;
+        }
+        
+        let health_after = target.current_health;
+        let target_died = health_after == 0;
+        
+        // Update attacker's facing direction based on relative position
+        if attacker_x < target_x {
+            self.entities[attacker_idx].facing_right = true;
+        } else if attacker_x > target_x {
+            self.entities[attacker_idx].facing_right = false;
+        }
+        
+        Some(CombatMessage {
+            attacker: attacker_id,
+            target: target_id,
+            damage,
+            target_health_after: health_after,
+            target_died,
+        })
+    }
+    
     fn move_entity(&mut self, entity_idx: usize, dx: i32, dy: i32) {
         if entity_idx >= self.entities.len() {
             return;
@@ -320,12 +391,17 @@ impl GameState {
             let new_x = new_x as usize;
             let new_y = new_y as usize;
             
+            // Check bounds
+            if new_x >= self.dungeon.width || new_y >= self.dungeon.height {
+                return;
+            }
+            
             // Check if tile is walkable
             if !self.dungeon.is_walkable(new_x, new_y) {
                 return;
             }
             
-            // Check if another entity is at that position
+            // Check if another entity is at that position (but allow attacking enemies)
             let entity_id = self.entities[entity_idx].id.clone();
             let occupied = self.entities.iter().any(|e| e.id != entity_id && e.x == new_x && e.y == new_y && e.is_alive());
             if occupied {

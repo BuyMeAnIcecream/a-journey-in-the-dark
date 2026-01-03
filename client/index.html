@@ -42,6 +42,33 @@
             color: #666;
             font-size: 12px;
         }
+        
+        #console {
+            margin-top: 20px;
+            width: 600px;
+            max-width: 100%;
+            background: #0a0a0a;
+            border: 2px solid #444;
+            padding: 10px;
+            max-height: 200px;
+            overflow-y: auto;
+            font-size: 12px;
+            color: #0f0;
+        }
+        
+        #console .message {
+            margin: 2px 0;
+            padding: 2px 0;
+        }
+        
+        #console .message.combat {
+            color: #ff6b6b;
+        }
+        
+        #console .message.death {
+            color: #ff0000;
+            font-weight: bold;
+        }
     </style>
 </head>
 <body>
@@ -49,6 +76,7 @@
     <canvas id="gameContainer"></canvas>
     <div id="status">Connecting...</div>
     <div id="controls">Use Arrow Keys or WASD to move</div>
+    <div id="console"></div>
     
     <script>
         const canvas = document.getElementById('gameContainer');
@@ -119,6 +147,20 @@
                 statusDiv.textContent = 'Connected';
             };
             
+            const consoleDiv = document.getElementById('console');
+            
+            function addConsoleMessage(text, className = '') {
+                const messageDiv = document.createElement('div');
+                messageDiv.className = `message ${className}`;
+                messageDiv.textContent = text;
+                consoleDiv.appendChild(messageDiv);
+                consoleDiv.scrollTop = consoleDiv.scrollHeight;
+                // Keep only last 50 messages
+                while (consoleDiv.children.length > 50) {
+                    consoleDiv.removeChild(consoleDiv.firstChild);
+                }
+            }
+            
             ws.onmessage = async (event) => {
                 gameState = JSON.parse(event.data);
                 console.log('Game state received:', {
@@ -128,6 +170,21 @@
                     entities: gameState.entities ? gameState.entities.length : 0,
                     firstTile: gameState.map?.[0]?.[0]
                 });
+                
+                // Display combat messages
+                if (gameState.messages && gameState.messages.length > 0) {
+                    gameState.messages.forEach(msg => {
+                        // Find target entity to get max_health for display
+                        const targetEntity = gameState.entities?.find(e => e.id === msg.target);
+                        const maxHealth = targetEntity ? targetEntity.max_health : msg.target_health_after;
+                        
+                        if (msg.target_died) {
+                            addConsoleMessage(`${msg.attacker} killed ${msg.target}!`, 'death');
+                        } else {
+                            addConsoleMessage(`${msg.attacker} dealt ${msg.damage} damage to ${msg.target} (${msg.target_health_after}/${maxHealth})`, 'combat');
+                        }
+                    });
+                }
                 
                 // Load sprite sheets for all entities (wait for all to load)
                 if (gameState.entities) {

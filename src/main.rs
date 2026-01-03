@@ -18,7 +18,7 @@ mod game_object_registry;
 mod tile;
 mod tile_registry;
 
-use game::{GameState, PlayerCommand};
+use game::{GameState, PlayerCommand, CombatMessage};
 
 type SharedState = Arc<Mutex<GameState>>;
 type Tx = broadcast::Sender<String>;
@@ -44,6 +44,7 @@ struct GameUpdate {
     entities: Vec<EntityData>,  // All entities (player + AI)
     width: usize,
     height: usize,
+    messages: Vec<CombatMessage>,  // Combat messages for this update
 }
 
 #[tokio::main]
@@ -163,6 +164,7 @@ async fn handle_socket(socket: WebSocket, state: SharedState, tx: Tx) {
             entities,
             width: game.dungeon.width,
             height: game.dungeon.height,
+            messages: Vec::new(),  // No messages on initial state
         };
         serde_json::to_string(&update).unwrap()
     };
@@ -183,7 +185,7 @@ async fn handle_socket(socket: WebSocket, state: SharedState, tx: Tx) {
         while let Some(Ok(Message::Text(text))) = receiver.next().await {
             if let Ok(cmd) = serde_json::from_str::<PlayerCommand>(&text) {
                 let mut game = state.lock().unwrap();
-                game.handle_command(&cmd, &player_id_clone);
+                let combat_message = game.handle_command(&cmd, &player_id_clone);
                 
                 // Broadcast update
                 // Convert entities to EntityData
@@ -212,11 +214,14 @@ async fn handle_socket(socket: WebSocket, state: SharedState, tx: Tx) {
                     })
                     .collect();
                 
+                let messages = combat_message.into_iter().collect::<Vec<_>>();
+                
                 let update = serde_json::to_string(&GameUpdate {
                     map: game.dungeon.tiles.clone(),
                     entities,
                     width: game.dungeon.width,
                     height: game.dungeon.height,
+                    messages,
                 }).unwrap();
                 let _ = tx.send(update);
             }
