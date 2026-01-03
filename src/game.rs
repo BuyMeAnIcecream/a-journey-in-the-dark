@@ -465,28 +465,28 @@ impl GameState {
             }
             
             if let Some((target_x, target_y)) = nearest_player {
-                // Chase: move towards player
-                let dx = if target_x > ai_x { 1 } else if target_x < ai_x { -1 } else { 0 };
-                let dy = if target_y > ai_y { 1 } else if target_y < ai_y { -1 } else { 0 };
-                
-                let new_x = (ai_x as i32 + dx) as usize;
-                let new_y = (ai_y as i32 + dy) as usize;
-                
-                // Check if there's a player at target position (attack)
-                if let Some(target_idx) = self.entities.iter().position(|e| {
-                    e.x == new_x && 
-                    e.y == new_y && 
-                    e.is_alive() &&
-                    e.controller == EntityController::Player
-                }) {
-                    // Attack player
-                    if let Some(msg) = self.attack_entity(ai_idx, target_idx) {
-                        messages.push(msg);
+                // Use pathfinding to find the best move towards player
+                if let Some((dx, dy)) = self.find_path_step(ai_x, ai_y, target_x, target_y, ai_idx) {
+                    let new_x = (ai_x as i32 + dx) as usize;
+                    let new_y = (ai_y as i32 + dy) as usize;
+                    
+                    // Check if there's a player at target position (attack)
+                    if let Some(target_idx) = self.entities.iter().position(|e| {
+                        e.x == new_x && 
+                        e.y == new_y && 
+                        e.is_alive() &&
+                        e.controller == EntityController::Player
+                    }) {
+                        // Attack player
+                        if let Some(msg) = self.attack_entity(ai_idx, target_idx) {
+                            messages.push(msg);
+                        }
+                    } else {
+                        // Move towards player using pathfinding
+                        self.move_entity(ai_idx, dx, dy);
                     }
-                } else {
-                    // Move towards player
-                    self.move_entity(ai_idx, dx, dy);
                 }
+                // If pathfinding fails, monster stays in place (blocked)
             } else {
                 // No player nearby, wander randomly
                 let directions = [(0, -1), (0, 1), (-1, 0), (1, 0)];
@@ -499,6 +499,102 @@ impl GameState {
         }
         
         messages
+    }
+    
+    // BFS pathfinding to find the next step towards target
+    fn find_path_step(&self, start_x: usize, start_y: usize, target_x: usize, target_y: usize, entity_idx: usize) -> Option<(i32, i32)> {
+        use std::collections::{VecDeque, HashSet, HashMap};
+        
+        // If already adjacent, return direct move
+        let dx = target_x as i32 - start_x as i32;
+        let dy = target_y as i32 - start_y as i32;
+        if dx.abs() <= 1 && dy.abs() <= 1 {
+            // Check if direct move is valid
+            let check_dx = if dx > 0 { 1 } else if dx < 0 { -1 } else { 0 };
+            let check_dy = if dy > 0 { 1 } else if dy < 0 { -1 } else { 0 };
+            let check_x = (start_x as i32 + check_dx) as usize;
+            let check_y = (start_y as i32 + check_dy) as usize;
+            
+            if check_x < self.dungeon.width && check_y < self.dungeon.height &&
+               self.dungeon.is_walkable(check_x, check_y) {
+                // Check if position is occupied by another entity
+                let entity_id = &self.entities[entity_idx].id;
+                let occupied = self.entities.iter().any(|e| 
+                    e.id != *entity_id && e.x == check_x && e.y == check_y && e.is_alive()
+                );
+                if !occupied {
+                    return Some((check_dx, check_dy));
+                }
+            }
+        }
+        
+        // BFS to find path
+        let mut queue = VecDeque::new();
+        let mut visited = HashSet::new();
+        let mut parent: HashMap<(usize, usize), (usize, usize)> = HashMap::new();
+        
+        queue.push_back((start_x, start_y));
+        visited.insert((start_x, start_y));
+        
+        let directions = [(0, -1), (0, 1), (-1, 0), (1, 0)];
+        let entity_id = &self.entities[entity_idx].id;
+        
+        while let Some((x, y)) = queue.pop_front() {
+            if x == target_x && y == target_y {
+                // Reconstruct path to find first step
+                let mut current = (x, y);
+                let mut path = Vec::new();
+                
+                while current != (start_x, start_y) {
+                    path.push(current);
+                    if let Some(&prev) = parent.get(&current) {
+                        current = prev;
+                    } else {
+                        break;
+                    }
+                }
+                
+                if let Some(&first_step) = path.last() {
+                    let dx = first_step.0 as i32 - start_x as i32;
+                    let dy = first_step.1 as i32 - start_y as i32;
+                    return Some((dx, dy));
+                }
+                break;
+            }
+            
+            for &(dx, dy) in &directions {
+                let new_x = (x as i32 + dx) as usize;
+                let new_y = (y as i32 + dy) as usize;
+                
+                if new_x >= self.dungeon.width || new_y >= self.dungeon.height {
+                    continue;
+                }
+                
+                if !self.dungeon.is_walkable(new_x, new_y) {
+                    continue;
+                }
+                
+                // Check if position is occupied by another entity (except target)
+                let occupied = self.entities.iter().any(|e| 
+                    e.id != *entity_id && 
+                    e.x == new_x && 
+                    e.y == new_y && 
+                    e.is_alive() &&
+                    !(e.x == target_x && e.y == target_y) // Allow target position
+                );
+                if occupied {
+                    continue;
+                }
+                
+                if !visited.contains(&(new_x, new_y)) {
+                    visited.insert((new_x, new_y));
+                    parent.insert((new_x, new_y), (x, y));
+                    queue.push_back((new_x, new_y));
+                }
+            }
+        }
+        
+        None // No path found
     }
 }
 
