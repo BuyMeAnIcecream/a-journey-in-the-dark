@@ -273,6 +273,9 @@ class GameObjectEditor:
         """Handle property change - auto-save after a short delay"""
         if not self.current_object:
             return
+        # Don't auto-save when loading object into form (would cause infinite loop)
+        if hasattr(self, '_loading_object'):
+            return
         # Debounce: cancel previous auto-save and schedule a new one
         if hasattr(self, '_auto_save_job'):
             self.root.after_cancel(self._auto_save_job)
@@ -504,19 +507,33 @@ class GameObjectEditor:
         else:
             self.zoom_out()
     
-    def refresh_object_list(self):
-        """Refresh the object listbox"""
+    def refresh_object_list(self, preserve_selection=False):
+        """Refresh the object listbox
+        
+        Args:
+            preserve_selection: If True, restore the selection after refresh
+        """
+        # Save current selection if preserving
+        selected_id = None
+        if preserve_selection and self.current_object:
+            selected_id = self.current_object.get("id")
+        
         self.object_listbox.delete(0, tk.END)
         if not self.config or "game_objects" not in self.config:
             return
         
         filter_text = self.filter_var.get().lower()
-        for obj in self.config["game_objects"]:
+        for idx, obj in enumerate(self.config["game_objects"]):
             name = obj.get("name", obj.get("id", "Unknown"))
             obj_type = obj.get("object_type", "unknown")
             display_text = f"{name} ({obj_type})"
             if filter_text == "" or filter_text in display_text.lower():
+                listbox_idx = self.object_listbox.size()
                 self.object_listbox.insert(tk.END, display_text)
+                # Restore selection if this is the selected object
+                if preserve_selection and selected_id and obj.get("id") == selected_id:
+                    self.object_listbox.selection_set(listbox_idx)
+                    self.object_listbox.see(listbox_idx)
     
     def filter_objects(self, *args):
         """Filter objects based on search text"""
@@ -557,6 +574,9 @@ class GameObjectEditor:
         """Load current object properties into form"""
         if not self.current_object:
             return
+        
+        # Set flag to prevent auto-save during loading
+        self._loading_object = True
         
         obj = self.current_object
         
@@ -604,6 +624,9 @@ class GameObjectEditor:
         props_text = "\n".join(f"{k}={v}" for k, v in props.items())
         self.custom_props_text.delete(1.0, tk.END)
         self.custom_props_text.insert(1.0, props_text)
+        
+        # Clear loading flag - done loading object into form
+        self._loading_object = False
     
     
     def add_sprite_from_click(self):
@@ -890,8 +913,8 @@ class GameObjectEditor:
                     props[k.strip()] = v.strip()
         self.current_object["properties"] = props if props else {}
         
-        # Refresh the object list to show updated name
-        self.refresh_object_list()
+        # Refresh the object list to show updated name (preserve selection)
+        self.refresh_object_list(preserve_selection=True)
         
         # Auto-save after updating object
         self.save_config()

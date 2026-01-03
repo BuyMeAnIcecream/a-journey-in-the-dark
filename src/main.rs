@@ -44,11 +44,20 @@ async fn main() {
             cfg
         }
         Err(e) => {
-            eprintln!("Warning: Could not load game_config.toml: {}. Using defaults.", e);
-            // Create default config if it doesn't exist
-            let default_config = create_default_config();
-            let _ = default_config.save("game_config.toml");
-            default_config
+            // Check if file exists - only create default if it doesn't exist
+            let config_path = std::path::Path::new("game_config.toml");
+            if !config_path.exists() {
+                eprintln!("game_config.toml not found. Creating default config.");
+                let default_config = create_default_config();
+                let _ = default_config.save("game_config.toml");
+                default_config
+            } else {
+                // File exists but has parse errors - don't overwrite it!
+                eprintln!("ERROR: Could not parse game_config.toml: {}", e);
+                eprintln!("The file exists but has errors. Please fix it manually or use the editor.");
+                eprintln!("Server will exit to prevent data loss.");
+                std::process::exit(1);
+            }
         }
     };
 
@@ -171,67 +180,76 @@ fn create_default_config() -> config::GameConfig {
     let mut objects = Vec::new();
     
     // Wall tiles (non-walkable)
-    objects.push(GameObject::new(
+    let mut wall_dirt_top = GameObject::new(
         "wall_dirt_top".to_string(),
         "Dirt Wall (Top)".to_string(),
         "tile".to_string(),
         false,
         0, 0,
-    ));
-    objects.push(GameObject::new(
+    );
+    wall_dirt_top.sprite_sheet = Some("tiles.png".to_string());
+    objects.push(wall_dirt_top);
+    
+    let mut wall_dirt_side = GameObject::new(
         "wall_dirt_side".to_string(),
         "Dirt Wall (Side)".to_string(),
         "tile".to_string(),
         false,
         1, 0,
-    ));
-    objects.push(GameObject::new(
+    );
+    wall_dirt_side.sprite_sheet = Some("tiles.png".to_string());
+    objects.push(wall_dirt_side);
+    
+    let mut wall_stone_top = GameObject::new(
         "wall_stone_top".to_string(),
         "Stone Wall (Top)".to_string(),
         "tile".to_string(),
         false,
         0, 1,
-    ));
+    );
+    wall_stone_top.sprite_sheet = Some("tiles.png".to_string());
+    objects.push(wall_stone_top);
     
     // Floor tiles (walkable) - with multiple sprite variations for randomization
-    objects.push(
-        GameObject::new(
-            "floor_dark".to_string(),
-            "Dark Floor".to_string(),
-            "tile".to_string(),
-            true,
-            0, 6,
-        )
-        .with_sprites(vec![
-            SpriteCoord { x: 0, y: 6 },  // 7.a - blank floor (dark grey)
-        ])
-    );
-    objects.push(
-        GameObject::new(
-            "floor_stone".to_string(),
-            "Stone Floor".to_string(),
-            "tile".to_string(),
-            true,
-            1, 6,
-        )
-        .with_sprites(vec![
-            SpriteCoord { x: 1, y: 6 },  // 7.b - floor stone 1
-            SpriteCoord { x: 2, y: 6 },  // 7.c - floor stone 2
-            SpriteCoord { x: 3, y: 6 },  // 7.d - floor stone 3
-        ])
-    );
+    let mut floor_dark = GameObject::new(
+        "floor_dark".to_string(),
+        "Dark Floor".to_string(),
+        "tile".to_string(),
+        true,
+        0, 6,
+    )
+    .with_sprites(vec![
+        SpriteCoord { x: 0, y: 6 },  // 7.a - blank floor (dark grey)
+    ]);
+    floor_dark.sprite_sheet = Some("tiles.png".to_string());
+    objects.push(floor_dark);
+    
+    let mut floor_stone = GameObject::new(
+        "floor_stone".to_string(),
+        "Stone Floor".to_string(),
+        "tile".to_string(),
+        true,
+        1, 6,
+    )
+    .with_sprites(vec![
+        SpriteCoord { x: 1, y: 6 },  // 7.b - floor stone 1
+        SpriteCoord { x: 2, y: 6 },  // 7.c - floor stone 2
+        SpriteCoord { x: 3, y: 6 },  // 7.d - floor stone 3
+    ]);
+    floor_stone.sprite_sheet = Some("tiles.png".to_string());
+    objects.push(floor_stone);
     
     // Character/Player
-    objects.push(
-        GameObject::new(
-            "player".to_string(),
-            "Player Character".to_string(),
-            "character".to_string(),
-            true,  // Characters can move
-            0, 0,  // Default sprite - should be set via editor
-        )
-        .with_health(100)
-    );
+    let mut player = GameObject::new(
+        "player".to_string(),
+        "Player Character".to_string(),
+        "character".to_string(),
+        true,  // Characters can move
+        0, 0,  // Default sprite - should be set via editor
+    )
+    .with_health(100);
+    player.sprite_sheet = Some("rogues.png".to_string());
+    objects.push(player);
     
     config::GameConfig { game_objects: objects }
 }
