@@ -1,0 +1,10 @@
+/target
+Cargo.lock
+*.log
+.DS_Store
+/assets/*.png
+/assets/*.jpg
+/assets/*.gif
+!assets/.gitkeep
+
+

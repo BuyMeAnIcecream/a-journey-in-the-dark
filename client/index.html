@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Roguelike Game</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            background: #1a1a1a;
+            color: #fff;
+            font-family: 'Courier New', monospace;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        #gameContainer {
+            border: 2px solid #444;
+            background: #000;
+            image-rendering: pixelated;
+            image-rendering: crisp-edges;
+        }
+        
+        #status {
+            margin-top: 20px;
+            text-align: center;
+            color: #888;
+        }
+        
+        #controls {
+            margin-top: 10px;
+            text-align: center;
+            color: #666;
+            font-size: 12px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Roguelike Dungeon</h1>
+    <canvas id="gameContainer"></canvas>
+    <div id="status">Connecting...</div>
+    <div id="controls">Use Arrow Keys or WASD to move</div>
+    
+    <script>
+        const canvas = document.getElementById('gameContainer');
+        const ctx = canvas.getContext('2d');
+        const statusDiv = document.getElementById('status');
+        
+        const TILE_SIZE = 32;
+        const SPRITE_SHEET_TILE_SIZE = 32; // Size of each tile in the sprite sheet
+        let gameState = null;
+        let ws = null;
+        let spriteSheet = null;
+        let spriteSheetLoaded = false;
+        
+        // Load sprite sheet
+        function loadSpriteSheet() {
+            spriteSheet = new Image();
+            spriteSheet.onload = () => {
+                console.log('Sprite sheet loaded successfully:', spriteSheet.width, 'x', spriteSheet.height);
+                spriteSheetLoaded = true;
+                if (gameState) render();
+            };
+            spriteSheet.onerror = (e) => {
+                console.error('Failed to load sprite sheet:', e);
+                statusDiv.textContent = 'Failed to load sprites - check console';
+                console.log('Tried to load:', spriteSheet.src);
+                // Still allow rendering with fallback colors
+                spriteSheetLoaded = true;
+            };
+            spriteSheet.src = '/assets/tiles.png';
+            console.log('Loading sprite sheet from:', spriteSheet.src);
+        }
+        
+        // Initialize WebSocket connection
+        function connect() {
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = `${protocol}//${window.location.host}/ws`;
+            ws = new WebSocket(wsUrl);
+            
+            ws.onopen = () => {
+                statusDiv.textContent = 'Connected';
+            };
+            
+            ws.onmessage = (event) => {
+                gameState = JSON.parse(event.data);
+                console.log('Game state received:', {
+                    width: gameState.width,
+                    height: gameState.height,
+                    mapSize: gameState.map ? `${gameState.map.length}x${gameState.map[0]?.length}` : 'null',
+                    player: { 
+                        x: gameState.player_x, 
+                        y: gameState.player_y,
+                        sprite_x: gameState.player_sprite_x,
+                        sprite_y: gameState.player_sprite_y
+                    },
+                    firstTile: gameState.map?.[0]?.[0]
+                });
+                render();
+            };
+            
+            ws.onerror = () => {
+                statusDiv.textContent = 'Connection error';
+            };
+            
+            ws.onclose = () => {
+                statusDiv.textContent = 'Disconnected. Reconnecting...';
+                setTimeout(connect, 1000);
+            };
+        }
+        
+        // Render the game
+        function render() {
+            if (!gameState || !spriteSheetLoaded) return;
+            
+            canvas.width = gameState.width * TILE_SIZE;
+            canvas.height = gameState.height * TILE_SIZE;
+            
+            // Draw map tiles
+            for (let y = 0; y < gameState.height; y++) {
+                for (let x = 0; x < gameState.width; x++) {
+                    // Skip drawing tile if player is here (will draw player on top)
+                    if (x === gameState.player_x && y === gameState.player_y) {
+                        continue;
+                    }
+                    
+                    const tile = gameState.map[y][x];
+                    
+                    if (!tile) {
+                        // Fallback: draw black tile if tile is missing
+                        ctx.fillStyle = '#000000';
+                        ctx.fillRect(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
+                        continue;
+                    }
+                    
+                    // Draw sprite from sprite sheet
+                    const srcX = (tile.sprite_x || 0) * SPRITE_SHEET_TILE_SIZE;
+                    const srcY = (tile.sprite_y || 0) * SPRITE_SHEET_TILE_SIZE;
+                    const destX = x * TILE_SIZE;
+                    const destY = y * TILE_SIZE;
+                    
+                    // Check if sprite sheet is loaded
+                    if (spriteSheet && spriteSheet.complete) {
+                        ctx.drawImage(
+                            spriteSheet,
+                            srcX, srcY, SPRITE_SHEET_TILE_SIZE, SPRITE_SHEET_TILE_SIZE,
+                            destX, destY, TILE_SIZE, TILE_SIZE
+                        );
+                    } else {
+                        // Fallback: draw colored rectangle based on walkable
+                        ctx.fillStyle = tile.walkable ? '#333333' : '#111111';
+                        ctx.fillRect(destX, destY, TILE_SIZE, TILE_SIZE);
+                    }
+                }
+            }
+            
+            // Draw player sprite from GameObject (on top of tiles)
+            const playerX = gameState.player_x || 0;
+            const playerY = gameState.player_y || 0;
+            const playerSpriteX = gameState.player_sprite_x;
+            const playerSpriteY = gameState.player_sprite_y;
+            
+            const destX = playerX * TILE_SIZE;
+            const destY = playerY * TILE_SIZE;
+            
+            // Always draw player - use sprite if available, otherwise fallback
+            if (playerSpriteX !== undefined && playerSpriteY !== undefined && 
+                spriteSheet && spriteSheet.complete) {
+                const srcX = playerSpriteX * SPRITE_SHEET_TILE_SIZE;
+                const srcY = playerSpriteY * SPRITE_SHEET_TILE_SIZE;
+                
+                // Draw player sprite
+                ctx.drawImage(
+                    spriteSheet,
+                    srcX, srcY, SPRITE_SHEET_TILE_SIZE, SPRITE_SHEET_TILE_SIZE,
+                    destX, destY, TILE_SIZE, TILE_SIZE
+                );
+                
+                // If sprite is at (0,0) which might be black/invisible, add a visible border
+                if (playerSpriteX === 0 && playerSpriteY === 0) {
+                    ctx.strokeStyle = '#00ff00';
+                    ctx.lineWidth = 2;
+                    ctx.strokeRect(destX + 1, destY + 1, TILE_SIZE - 2, TILE_SIZE - 2);
+                }
+            } else {
+                // Fallback to colored rectangle if sprite not available
+                console.log('Player fallback render:', { 
+                    playerX, playerY, 
+                    playerSpriteX, playerSpriteY, 
+                    spriteSheetLoaded: spriteSheet?.complete 
+                });
+                ctx.fillStyle = '#00ff00';
+                ctx.fillRect(destX, destY, TILE_SIZE, TILE_SIZE);
+            }
+        }
+        
+        // Handle keyboard input
+        const keyMap = {
+            'ArrowUp': 'move_up',
+            'ArrowDown': 'move_down',
+            'ArrowLeft': 'move_left',
+            'ArrowRight': 'move_right',
+            'w': 'move_up',
+            's': 'move_down',
+            'a': 'move_left',
+            'd': 'move_right',
+        };
+        
+        let keysPressed = new Set();
+        
+        document.addEventListener('keydown', (e) => {
+            if (keysPressed.has(e.key)) return;
+            keysPressed.add(e.key);
+            
+            const action = keyMap[e.key.toLowerCase()];
+            if (action && ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ action }));
+            }
+        });
+        
+        document.addEventListener('keyup', (e) => {
+            keysPressed.delete(e.key);
+        });
+        
+        // Load sprite sheet and start connection
+        loadSpriteSheet();
+        connect();
+    </script>
+</body>
+</html>
+
