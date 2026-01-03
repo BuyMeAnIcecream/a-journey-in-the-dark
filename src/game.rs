@@ -24,6 +24,7 @@ pub struct Entity {
     pub max_health: u32,
     pub current_health: u32,
     pub controller: EntityController,
+    pub facing_right: bool,  // true = facing right, false = facing left
 }
 
 impl Entity {
@@ -45,6 +46,7 @@ impl Entity {
             max_health,
             current_health: max_health,
             controller,
+            facing_right: true,  // Default: facing right
         }
     }
     
@@ -280,7 +282,6 @@ impl GameState {
             
             let idx = self.entities.len();
             self.entities.push(player);
-            println!("Added new player entity at ({}, {})", spawn_x, spawn_y);
             Some(idx)
         } else {
             println!("WARNING: No player object found in registry!");
@@ -300,6 +301,16 @@ impl GameState {
         if entity_idx >= self.entities.len() {
             return;
         }
+        
+        // Update facing direction based on horizontal movement
+        if dx > 0 {
+            // Moving right
+            self.entities[entity_idx].facing_right = true;
+        } else if dx < 0 {
+            // Moving left
+            self.entities[entity_idx].facing_right = false;
+        }
+        // If dx == 0, keep current facing direction
         
         let entity = &self.entities[entity_idx];
         let new_x = entity.x as i32 + dx;

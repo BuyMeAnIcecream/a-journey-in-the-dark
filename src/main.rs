@@ -35,6 +35,7 @@ struct EntityData {
     current_health: u32,
     max_health: u32,
     attack: i32,
+    facing_right: bool,  // true = facing right, false = facing left (needs mirroring)
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -123,7 +124,6 @@ async fn handle_socket(socket: WebSocket, state: SharedState, tx: Tx) {
     {
         let mut game = state.lock().unwrap();
         game.add_player(player_id.clone());
-        println!("New player connected: {}", player_id);
     }
 
     // Send initial game state
@@ -140,8 +140,6 @@ async fn handle_socket(socket: WebSocket, state: SharedState, tx: Tx) {
                     .unwrap_or((0, 0));
                 let sprite_sheet = obj.and_then(|o| o.sprite_sheet.clone());
                 
-                println!("Entity {}: pos=({},{}), sprite=({},{}), sheet={:?}, controller={:?}", 
-                    entity.id, entity.x, entity.y, sprite_x, sprite_y, sprite_sheet, entity.controller);
                 
                 EntityData {
                     id: entity.id.clone(),
@@ -154,6 +152,7 @@ async fn handle_socket(socket: WebSocket, state: SharedState, tx: Tx) {
                     current_health: entity.current_health,
                     max_health: entity.max_health,
                     attack: entity.attack,
+                    facing_right: entity.facing_right,
                 }
             })
             .collect();
@@ -208,6 +207,7 @@ async fn handle_socket(socket: WebSocket, state: SharedState, tx: Tx) {
                             current_health: entity.current_health,
                             max_health: entity.max_health,
                             attack: entity.attack,
+                            facing_right: entity.facing_right,
                         }
                     })
                     .collect();
