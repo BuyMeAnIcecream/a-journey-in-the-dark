@@ -36,13 +36,25 @@ impl Dungeon {
 
     fn generate_rooms(tiles: &mut Vec<Vec<Tile>>, width: usize, height: usize, registry: &TileRegistry) -> Vec<Room> {
         let mut rng = rand::thread_rng();
-        let num_rooms = rng.gen_range(5..=10);
+        // Generate more rooms since they'll be closer together
+        let num_rooms = rng.gen_range(8..=12);
         let mut rooms: Vec<Room> = Vec::new();
+        const MAX_ATTEMPTS: usize = 200; // Limit attempts to avoid infinite loops
 
-        // Generate rooms
-        for _ in 0..num_rooms {
-            let room_width = rng.gen_range(4..=8);
-            let room_height = rng.gen_range(4..=8);
+        // Generate rooms with varied sizes (some bigger) and allow them to be closer together
+        let mut attempts = 0;
+        while rooms.len() < num_rooms && attempts < MAX_ATTEMPTS {
+            attempts += 1;
+            
+            // Vary room sizes: 30% chance for large rooms (10-15), 70% for normal (5-10)
+            let (room_width, room_height) = if rng.gen_bool(0.3) {
+                // Large room
+                (rng.gen_range(10..=15), rng.gen_range(10..=15))
+            } else {
+                // Normal room
+                (rng.gen_range(5..=10), rng.gen_range(5..=10))
+            };
+            
             let x = rng.gen_range(1..(width - room_width - 1));
             let y = rng.gen_range(1..(height - room_height - 1));
 
@@ -53,11 +65,28 @@ impl Dungeon {
                 height: room_height,
             };
             
-            // Check for overlaps (simple check)
+            // Check for overlaps - allow rooms to be closer (minimum 2 tile gap instead of complete separation)
+            let min_gap = 2; // Minimum gap between rooms
             let mut overlaps = false;
             for existing_room in &rooms {
-                if !(x + room_width < existing_room.x || existing_room.x + existing_room.width < x || 
-                     y + room_height < existing_room.y || existing_room.y + existing_room.height < y) {
+                // Check if rooms are too close (with minimum gap)
+                let gap_x = if x + room_width + min_gap < existing_room.x {
+                    false // Room is to the left with enough gap
+                } else if existing_room.x + existing_room.width + min_gap < x {
+                    false // Room is to the right with enough gap
+                } else {
+                    true // Rooms overlap horizontally or too close
+                };
+                
+                let gap_y = if y + room_height + min_gap < existing_room.y {
+                    false // Room is above with enough gap
+                } else if existing_room.y + existing_room.height + min_gap < y {
+                    false // Room is below with enough gap
+                } else {
+                    true // Rooms overlap vertically or too close
+                };
+                
+                if gap_x && gap_y {
                     overlaps = true;
                     break;
                 }
@@ -119,17 +148,9 @@ impl Dungeon {
             }
         }
         
-        // Connect rooms with corridors
-        for i in 0..rooms.len() - 1 {
-            let room1 = &rooms[i];
-            let room2 = &rooms[i + 1];
-            
-            let center1_x = room1.x + room1.width / 2;
-            let center1_y = room1.y + room1.height / 2;
-            let center2_x = room2.x + room2.width / 2;
-            let center2_y = room2.y + room2.height / 2;
-
-            // L-shaped corridor using all walkable tiles from registry
+        // Connect rooms with corridors using minimum spanning tree (MST) for shorter paths
+        // This ensures all rooms are connected with minimal total path length
+        if rooms.len() > 1 {
             let floor_tiles = registry.get_walkable_tiles();
             let default_floor = if floor_tiles.is_empty() {
                 registry.get_floor_dark()
@@ -137,64 +158,125 @@ impl Dungeon {
                 floor_tiles[0].clone()
             };
             
-            if rng.gen_bool(0.5) {
-                // Horizontal then vertical
-                let start_x = center1_x.min(center2_x);
-                let end_x = center1_x.max(center2_x);
-                for x in start_x..=end_x {
-                    if center1_y < tiles.len() && x < tiles[0].len() {
-                        let mut tile = if !floor_tiles.is_empty() {
-                            let floor_idx = rng.gen_range(0..floor_tiles.len());
-                            floor_tiles[floor_idx].clone()
-                        } else {
-                            default_floor.clone()
-                        };
-                        tile.randomize_sprite();
-                        tiles[center1_y][x] = tile;
-                    }
+            // Calculate distances between all room pairs
+            let mut distances: Vec<(usize, usize, usize)> = Vec::new();
+            for i in 0..rooms.len() {
+                for j in (i + 1)..rooms.len() {
+                    let center1_x = rooms[i].x + rooms[i].width / 2;
+                    let center1_y = rooms[i].y + rooms[i].height / 2;
+                    let center2_x = rooms[j].x + rooms[j].width / 2;
+                    let center2_y = rooms[j].y + rooms[j].height / 2;
+                    
+                    // Use Manhattan distance (L1) for path length estimation
+                    let dx = if center1_x > center2_x { center1_x - center2_x } else { center2_x - center1_x };
+                    let dy = if center1_y > center2_y { center1_y - center2_y } else { center2_y - center1_y };
+                    let distance = dx + dy;
+                    
+                    distances.push((i, j, distance));
                 }
-                let start_y = center1_y.min(center2_y);
-                let end_y = center1_y.max(center2_y);
-                for y in start_y..=end_y {
-                    if y < tiles.len() && center2_x < tiles[0].len() {
-                        let mut tile = if !floor_tiles.is_empty() {
-                            let floor_idx = rng.gen_range(0..floor_tiles.len());
-                            floor_tiles[floor_idx].clone()
-                        } else {
-                            default_floor.clone()
-                        };
-                        tile.randomize_sprite();
-                        tiles[y][center2_x] = tile;
-                    }
+            }
+            
+            // Sort by distance (shortest first)
+            distances.sort_by_key(|&(_, _, dist)| dist);
+            
+            // Use Union-Find (Disjoint Set Union) for MST
+            let mut parent: Vec<usize> = (0..rooms.len()).collect();
+            
+            fn find(parent: &mut [usize], x: usize) -> usize {
+                if parent[x] != x {
+                    parent[x] = find(parent, parent[x]);
                 }
-            } else {
-                // Vertical then horizontal
-                let start_y = center1_y.min(center2_y);
-                let end_y = center1_y.max(center2_y);
-                for y in start_y..=end_y {
-                    if y < tiles.len() && center1_x < tiles[0].len() {
-                        let mut tile = if !floor_tiles.is_empty() {
-                            let floor_idx = rng.gen_range(0..floor_tiles.len());
-                            floor_tiles[floor_idx].clone()
-                        } else {
-                            default_floor.clone()
-                        };
-                        tile.randomize_sprite();
-                        tiles[y][center1_x] = tile;
-                    }
+                parent[x]
+            }
+            
+            fn union(parent: &mut [usize], x: usize, y: usize) -> bool {
+                let root_x = find(parent, x);
+                let root_y = find(parent, y);
+                if root_x != root_y {
+                    parent[root_y] = root_x;
+                    true
+                } else {
+                    false
                 }
-                let start_x = center1_x.min(center2_x);
-                let end_x = center1_x.max(center2_x);
-                for x in start_x..=end_x {
-                    if center2_y < tiles.len() && x < tiles[0].len() {
-                        let mut tile = if !floor_tiles.is_empty() {
-                            let floor_idx = rng.gen_range(0..floor_tiles.len());
-                            floor_tiles[floor_idx].clone()
-                        } else {
-                            default_floor.clone()
-                        };
-                        tile.randomize_sprite();
-                        tiles[center2_y][x] = tile;
+            }
+            
+            // Build MST: connect rooms with shortest paths first
+            for (i, j, _) in distances {
+                if union(&mut parent, i, j) {
+                    // Connect these two rooms
+                    let room1 = &rooms[i];
+                    let room2 = &rooms[j];
+                    
+                    let center1_x = room1.x + room1.width / 2;
+                    let center1_y = room1.y + room1.height / 2;
+                    let center2_x = room2.x + room2.width / 2;
+                    let center2_y = room2.y + room2.height / 2;
+                    
+                    // L-shaped corridor (choose direction that minimizes path)
+                    let dx = if center2_x > center1_x { center2_x - center1_x } else { center1_x - center2_x };
+                    let dy = if center2_y > center1_y { center2_y - center1_y } else { center1_y - center2_y };
+                    
+                    // Choose direction that creates shorter path
+                    if dx < dy {
+                        // Horizontal then vertical
+                        let start_x = center1_x.min(center2_x);
+                        let end_x = center1_x.max(center2_x);
+                        for x in start_x..=end_x {
+                            if center1_y < tiles.len() && x < tiles[0].len() {
+                                let mut tile = if !floor_tiles.is_empty() {
+                                    let floor_idx = rng.gen_range(0..floor_tiles.len());
+                                    floor_tiles[floor_idx].clone()
+                                } else {
+                                    default_floor.clone()
+                                };
+                                tile.randomize_sprite();
+                                tiles[center1_y][x] = tile;
+                            }
+                        }
+                        let start_y = center1_y.min(center2_y);
+                        let end_y = center1_y.max(center2_y);
+                        for y in start_y..=end_y {
+                            if y < tiles.len() && center2_x < tiles[0].len() {
+                                let mut tile = if !floor_tiles.is_empty() {
+                                    let floor_idx = rng.gen_range(0..floor_tiles.len());
+                                    floor_tiles[floor_idx].clone()
+                                } else {
+                                    default_floor.clone()
+                                };
+                                tile.randomize_sprite();
+                                tiles[y][center2_x] = tile;
+                            }
+                        }
+                    } else {
+                        // Vertical then horizontal
+                        let start_y = center1_y.min(center2_y);
+                        let end_y = center1_y.max(center2_y);
+                        for y in start_y..=end_y {
+                            if y < tiles.len() && center1_x < tiles[0].len() {
+                                let mut tile = if !floor_tiles.is_empty() {
+                                    let floor_idx = rng.gen_range(0..floor_tiles.len());
+                                    floor_tiles[floor_idx].clone()
+                                } else {
+                                    default_floor.clone()
+                                };
+                                tile.randomize_sprite();
+                                tiles[y][center1_x] = tile;
+                            }
+                        }
+                        let start_x = center1_x.min(center2_x);
+                        let end_x = center1_x.max(center2_x);
+                        for x in start_x..=end_x {
+                            if center2_y < tiles.len() && x < tiles[0].len() {
+                                let mut tile = if !floor_tiles.is_empty() {
+                                    let floor_idx = rng.gen_range(0..floor_tiles.len());
+                                    floor_tiles[floor_idx].clone()
+                                } else {
+                                    default_floor.clone()
+                                };
+                                tile.randomize_sprite();
+                                tiles[center2_y][x] = tile;
+                            }
+                        }
                     }
                 }
             }
