@@ -80,7 +80,7 @@
     
     <script>
         const canvas = document.getElementById('gameContainer');
-        const ctx = canvas.getContext('2d');
+        const ctx = canvas.getContext('2d', { alpha: true }); // Enable alpha channel for transparency
         const statusDiv = document.getElementById('status');
         
         const TILE_SIZE = 32;
@@ -224,22 +224,12 @@
             canvas.width = gameState.width * TILE_SIZE;
             canvas.height = gameState.height * TILE_SIZE;
             
-            // Build a set of entity positions to skip when drawing tiles
-            const entityPositions = new Set();
-            if (gameState.entities) {
-                for (const entity of gameState.entities) {
-                    entityPositions.add(`${entity.x},${entity.y}`);
-                }
-            }
+            // Clear canvas with transparent background to ensure proper transparency
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
             
-            // Draw map tiles
+            // Draw map tiles first (so entities render on top)
             for (let y = 0; y < gameState.height; y++) {
                 for (let x = 0; x < gameState.width; x++) {
-                    // Skip drawing tile if an entity is here (will draw entity on top)
-                    if (entityPositions.has(`${x},${y}`)) {
-                        continue;
-                    }
-                    
                     const tile = gameState.map[y][x];
                     
                     if (!tile) {
@@ -258,6 +248,9 @@
                     // Check if sprite sheet is loaded (tiles use default sprite sheet)
                     const tileSpriteSheet = getSpriteSheet(DEFAULT_SPRITE_SHEET);
                     if (tileSpriteSheet && tileSpriteSheet.complete) {
+                        // Ensure transparency is preserved for tiles
+                        ctx.globalCompositeOperation = 'source-over';
+                        ctx.imageSmoothingEnabled = false;
                         ctx.drawImage(
                             tileSpriteSheet,
                             srcX, srcY, SPRITE_SHEET_TILE_SIZE, SPRITE_SHEET_TILE_SIZE,
@@ -288,6 +281,10 @@
                         
                         // Save canvas state
                         ctx.save();
+                        
+                        // Ensure transparency is preserved
+                        ctx.globalCompositeOperation = 'source-over';
+                        ctx.imageSmoothingEnabled = false; // Pixel art should not be smoothed
                         
                         // Sprite naturally faces LEFT, so we flip when facing RIGHT
                         if (entity.facing_right === true) {
