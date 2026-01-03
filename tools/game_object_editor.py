@@ -697,6 +697,9 @@ class GameObjectEditor:
                     else:
                         var.set("")
                 self.custom_props_text.delete(1.0, tk.END)
+                self.sprite_listbox.delete(0, tk.END)
+                # Automatically save to clean up the file
+                self.save_config()
     
     def highlight_sprite(self):
         """Highlight all sprites in the array on the sprite sheet"""
@@ -812,10 +815,36 @@ class GameObjectEditor:
             print(f"✓ {'Added' if response else 'Set'} sprite coordinates ({tile_x}, {tile_y}) for '{self.current_object.get('name', 'object')}'")
     
     def save_config(self):
-        """Save config to file"""
+        """Save config to file with proper formatting"""
         try:
+            # Clean up the config structure before saving
+            # Ensure all objects have proper structure
+            for obj in self.config.get("game_objects", []):
+                # Ensure sprites is a list
+                if "sprites" not in obj:
+                    obj["sprites"] = []
+                # Convert sprites to proper format if needed
+                if obj["sprites"]:
+                    cleaned_sprites = []
+                    for sprite in obj["sprites"]:
+                        if isinstance(sprite, dict):
+                            cleaned_sprites.append(sprite)
+                        elif hasattr(sprite, 'x') and hasattr(sprite, 'y'):
+                            cleaned_sprites.append({"x": sprite.x, "y": sprite.y})
+                    obj["sprites"] = cleaned_sprites
+            
+            # Write with proper formatting
             with open(self.config_path, 'w') as f:
                 toml.dump(self.config, f)
+            
+            # Verify the saved file is valid
+            try:
+                with open(self.config_path, 'r') as f:
+                    toml.load(f)  # Validate it can be parsed
+            except Exception as e:
+                messagebox.showwarning("Warning", f"Config saved but validation failed: {e}")
+                return
+            
             messagebox.showinfo("Success", f"Config saved to {self.config_path}")
             # Update server status after saving
             self.root.after(500, self.check_server_status)

@@ -1,49 +1,23 @@
 [[game_objects]]
 id = "wall_dirt_top"
-name = "Dirt Wall (Top)"
+name = "Dirt Wall"
 object_type = "tile"
 walkable = false
-sprite_x = 0
-sprite_y = 0
+sprite_sheet = "tiles.png"
 [[game_objects.sprites]]
 x = 0
-y = 0
-
-
-[[game_objects]]
-id = "wall_dirt_side"
-name = "Dirt Wall (Side)"
-object_type = "tile"
-walkable = false
-sprite_x = 1
-sprite_y = 0
-[[game_objects.sprites]]
-x = 1
 y = 0
 
 
 [[game_objects]]
 id = "wall_stone_top"
-name = "Stone Wall (Top)"
+name = "Stone Wall"
 object_type = "tile"
 walkable = false
-sprite_x = 0
-sprite_y = 1
+sprite_sheet = "tiles.png"
 [[game_objects.sprites]]
 x = 0
 y = 1
-
-
-[[game_objects]]
-id = "floor_dark"
-name = "Dark Floor"
-object_type = "tile"
-walkable = true
-sprite_x = 0
-sprite_y = 6
-[[game_objects.sprites]]
-x = 0
-y = 6
 
 
 [[game_objects]]
@@ -51,20 +25,19 @@ id = "floor_stone"
 name = "Stone Floor"
 object_type = "tile"
 walkable = true
-sprite_x = 1
-sprite_y = 6
+sprite_sheet = "tiles.png"
 [[game_objects.sprites]]
 x = 1
 y = 6
-
 [[game_objects.sprites]]
 x = 2
 y = 6
-
 [[game_objects.sprites]]
 x = 3
 y = 6
-
+[[game_objects.sprites]]
+x = 0
+y = 6
 
 [[game_objects]]
 id = "player"
@@ -72,15 +45,8 @@ name = "Player Character"
 object_type = "character"
 walkable = true
 health = 100
-sprite_x = 0
-sprite_y = 0
 sprite_sheet = "rogues.png"
 [[game_objects.sprites]]
 x = 0
 y = 0
-
-[[game_objects.sprites]]
-x = 0
-y = 0
-
 

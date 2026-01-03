@@ -30,6 +30,7 @@ struct GameUpdate {
     player_y: usize,
     player_sprite_x: u32,
     player_sprite_y: u32,
+    player_sprite_sheet: Option<String>,  // Which sprite sheet the player uses
     width: usize,
     height: usize,
 }
@@ -98,10 +99,12 @@ async fn handle_socket(socket: WebSocket, state: SharedState, tx: Tx) {
     let initial_state = {
         let game = state.lock().unwrap();
         // Get player sprite from GameObject
-        let (player_sprite_x, player_sprite_y) = game.object_registry
-            .get_object(&game.player.object_id)
+        let player_obj = game.object_registry.get_object(&game.player.object_id);
+        let (player_sprite_x, player_sprite_y) = player_obj
             .and_then(|obj| obj.get_sprites_vec().first().map(|s| (s.x, s.y)))
             .unwrap_or((0, 0));
+        let player_sprite_sheet = player_obj
+            .and_then(|obj| obj.sprite_sheet.clone());
         
         serde_json::to_string(&GameUpdate {
             map: game.dungeon.tiles.clone(),
@@ -109,6 +112,7 @@ async fn handle_socket(socket: WebSocket, state: SharedState, tx: Tx) {
             player_y: game.player.y,
             player_sprite_x,
             player_sprite_y,
+            player_sprite_sheet,
             width: game.dungeon.width,
             height: game.dungeon.height,
         })
@@ -133,10 +137,12 @@ async fn handle_socket(socket: WebSocket, state: SharedState, tx: Tx) {
                 game.handle_command(&cmd);
                 
                 // Broadcast update
-                let (player_sprite_x, player_sprite_y) = game.object_registry
-                    .get_object(&game.player.object_id)
+                let player_obj = game.object_registry.get_object(&game.player.object_id);
+                let (player_sprite_x, player_sprite_y) = player_obj
                     .and_then(|obj| obj.get_sprites_vec().first().map(|s| (s.x, s.y)))
                     .unwrap_or((0, 0));
+                let player_sprite_sheet = player_obj
+                    .and_then(|obj| obj.sprite_sheet.clone());
                 
                 let update = serde_json::to_string(&GameUpdate {
                     map: game.dungeon.tiles.clone(),
@@ -144,6 +150,7 @@ async fn handle_socket(socket: WebSocket, state: SharedState, tx: Tx) {
                     player_y: game.player.y,
                     player_sprite_x,
                     player_sprite_y,
+                    player_sprite_sheet,
                     width: game.dungeon.width,
                     height: game.dungeon.height,
                 }).unwrap();

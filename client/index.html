@@ -59,26 +59,54 @@
         const SPRITE_SHEET_TILE_SIZE = 32; // Size of each tile in the sprite sheet
         let gameState = null;
         let ws = null;
-        let spriteSheet = null;
+        let spriteSheets = {};  // Map of sprite sheet name -> Image
         let spriteSheetLoaded = false;
+        const DEFAULT_SPRITE_SHEET = 'tiles.png';  // Default for tiles
         
-        // Load sprite sheet
-        function loadSpriteSheet() {
-            spriteSheet = new Image();
-            spriteSheet.onload = () => {
-                console.log('Sprite sheet loaded successfully:', spriteSheet.width, 'x', spriteSheet.height);
-                spriteSheetLoaded = true;
-                if (gameState) render();
-            };
-            spriteSheet.onerror = (e) => {
-                console.error('Failed to load sprite sheet:', e);
-                statusDiv.textContent = 'Failed to load sprites - check console';
-                console.log('Tried to load:', spriteSheet.src);
-                // Still allow rendering with fallback colors
-                spriteSheetLoaded = true;
-            };
-            spriteSheet.src = '/assets/tiles.png';
-            console.log('Loading sprite sheet from:', spriteSheet.src);
+        // Load a sprite sheet
+        function loadSpriteSheet(name) {
+            return new Promise((resolve, reject) => {
+                if (spriteSheets[name]) {
+                    resolve(spriteSheets[name]);
+                    return;
+                }
+                
+                const img = new Image();
+                img.onload = () => {
+                    console.log(`Sprite sheet "${name}" loaded successfully:`, img.width, 'x', img.height);
+                    spriteSheets[name] = img;
+                    resolve(img);
+                };
+                img.onerror = (e) => {
+                    console.error(`Failed to load sprite sheet "${name}":`, e);
+                    console.log('Tried to load:', img.src);
+                    reject(e);
+                };
+                img.src = `/assets/${name}`;
+                console.log(`Loading sprite sheet from:`, img.src);
+            });
+        }
+        
+        // Load default sprite sheet
+        function loadDefaultSpriteSheet() {
+            loadSpriteSheet(DEFAULT_SPRITE_SHEET)
+                .then(() => {
+                    spriteSheetLoaded = true;
+                    if (gameState) render();
+                })
+                .catch(() => {
+                    spriteSheetLoaded = true;  // Still allow rendering with fallback
+                    if (gameState) render();
+                });
+        }
+        
+        // Get sprite sheet by name, with fallback
+        function getSpriteSheet(name) {
+            if (name && spriteSheets[name]) {
+                return spriteSheets[name];
+            }
+            // Fallback to default
+            return spriteSheets[DEFAULT_SPRITE_SHEET] || null;
         }
         
         // Initialize WebSocket connection
@@ -91,7 +119,7 @@
                 statusDiv.textContent = 'Connected';
             };
             
-            ws.onmessage = (event) => {
+            ws.onmessage = async (event) => {
                 gameState = JSON.parse(event.data);
                 console.log('Game state received:', {
                     width: gameState.width,
@@ -101,10 +129,21 @@
                         x: gameState.player_x, 
                         y: gameState.player_y,
                         sprite_x: gameState.player_sprite_x,
-                        sprite_y: gameState.player_sprite_y
+                        sprite_y: gameState.player_sprite_y,
+                        sprite_sheet: gameState.player_sprite_sheet
                     },
                     firstTile: gameState.map?.[0]?.[0]
                 });
+                
+                // Load player's sprite sheet if specified and not already loaded
+                if (gameState.player_sprite_sheet) {
+                    try {
+                        await loadSpriteSheet(gameState.player_sprite_sheet);
+                    } catch (e) {
+                        console.warn(`Could not load player sprite sheet "${gameState.player_sprite_sheet}"`);
+                    }
+                }
+                
                 render();
             };
             
@@ -148,10 +187,11 @@
                     const destX = x * TILE_SIZE;
                     const destY = y * TILE_SIZE;
                     
-                    // Check if sprite sheet is loaded
-                    if (spriteSheet && spriteSheet.complete) {
+                    // Check if sprite sheet is loaded (tiles use default sprite sheet)
+                    const tileSpriteSheet = getSpriteSheet(DEFAULT_SPRITE_SHEET);
+                    if (tileSpriteSheet && tileSpriteSheet.complete) {
                         ctx.drawImage(
-                            spriteSheet,
+                            tileSpriteSheet,
                             srcX, srcY, SPRITE_SHEET_TILE_SIZE, SPRITE_SHEET_TILE_SIZE,
                             destX, destY, TILE_SIZE, TILE_SIZE
                         );
@@ -173,14 +213,17 @@
             const destY = playerY * TILE_SIZE;
             
             // Always draw player - use sprite if available, otherwise fallback
+            const playerSpriteSheetName = gameState.player_sprite_sheet || DEFAULT_SPRITE_SHEET;
+            const playerSpriteSheet = getSpriteSheet(playerSpriteSheetName);
+            
             if (playerSpriteX !== undefined && playerSpriteY !== undefined && 
-                spriteSheet && spriteSheet.complete) {
+                playerSpriteSheet && playerSpriteSheet.complete) {
                 const srcX = playerSpriteX * SPRITE_SHEET_TILE_SIZE;
                 const srcY = playerSpriteY * SPRITE_SHEET_TILE_SIZE;
                 
-                // Draw player sprite
+                // Draw player sprite from the correct sprite sheet
                 ctx.drawImage(
-                    spriteSheet,
+                    playerSpriteSheet,
                     srcX, srcY, SPRITE_SHEET_TILE_SIZE, SPRITE_SHEET_TILE_SIZE,
                     destX, destY, TILE_SIZE, TILE_SIZE
                 );
@@ -196,7 +239,8 @@
                 console.log('Player fallback render:', { 
                     playerX, playerY, 
                     playerSpriteX, playerSpriteY, 
-                    spriteSheetLoaded: spriteSheet?.complete 
+                    playerSpriteSheetName,
+                    spriteSheetLoaded: playerSpriteSheet?.complete 
                 });
                 ctx.fillStyle = '#00ff00';
                 ctx.fillRect(destX, destY, TILE_SIZE, TILE_SIZE);
@@ -231,8 +275,8 @@
             keysPressed.delete(e.key);
         });
         
-        // Load sprite sheet and start connection
-        loadSpriteSheet();
+        // Load default sprite sheet and start connection
+        loadDefaultSpriteSheet();
         connect();
     </script>
 </body>
