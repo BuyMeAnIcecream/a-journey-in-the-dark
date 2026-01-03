@@ -46,6 +46,9 @@ struct GameUpdate {
     width: usize,
     height: usize,
     messages: Vec<CombatMessage>,  // Combat messages for this update
+    stairs_position: Option<(usize, usize)>,  // Position of stairs (goal)
+    on_stairs: bool,  // Whether the current player is on stairs
+    level_complete: bool,  // Whether level is complete (all players confirmed)
 }
 
 #[tokio::main]
@@ -156,6 +159,9 @@ async fn generate_map_endpoint() -> Json<GameUpdate> {
         width: game_state.dungeon.width,
         height: game_state.dungeon.height,
         messages: Vec::new(),
+        stairs_position: game_state.stairs_position,
+        on_stairs: false,
+        level_complete: false,
     })
 }
 
@@ -214,12 +220,19 @@ async fn handle_socket(socket: WebSocket, state: SharedState, tx: Tx) {
             .collect();
         
         println!("Sending {} entities to client", entities.len());
+        // Check if current player is on stairs
+        let on_stairs = game.stairs_position.map_or(false, |(sx, sy)| {
+            game.entities.iter().any(|e| e.id == player_id && e.x == sx && e.y == sy)
+        });
         let update = GameUpdate {
             map: game.dungeon.tiles.clone(),
             entities,
             width: game.dungeon.width,
             height: game.dungeon.height,
             messages: Vec::new(),  // No messages on initial state
+            stairs_position: game.stairs_position,
+            on_stairs,
+            level_complete: false,
         };
         serde_json::to_string(&update).unwrap()
     };
@@ -240,7 +253,7 @@ async fn handle_socket(socket: WebSocket, state: SharedState, tx: Tx) {
         while let Some(Ok(Message::Text(text))) = receiver.next().await {
             if let Ok(cmd) = serde_json::from_str::<PlayerCommand>(&text) {
                 let mut game = state.lock().unwrap();
-                let combat_messages = game.handle_command(&cmd, &player_id_clone);
+                let (combat_messages, level_complete) = game.handle_command(&cmd, &player_id_clone);
                 
                 // Broadcast update
                 // Convert entities to EntityData
@@ -253,24 +266,29 @@ async fn handle_socket(socket: WebSocket, state: SharedState, tx: Tx) {
                             .unwrap_or((0, 0));
                         let sprite_sheet = obj.and_then(|o| o.sprite_sheet.clone());
                         
-            EntityData {
-                id: entity.id.clone(),
-                object_id: entity.object_id.clone(),
-                x: entity.x,
-                y: entity.y,
-                sprite_x,
-                sprite_y,
-                sprite_sheet,
-                controller: entity.controller,
-                current_health: entity.current_health,
-                max_health: entity.max_health,
-                attack: entity.attack,
-                facing_right: entity.facing_right,
-            }
+                        EntityData {
+                            id: entity.id.clone(),
+                            object_id: entity.object_id.clone(),
+                            x: entity.x,
+                            y: entity.y,
+                            sprite_x,
+                            sprite_y,
+                            sprite_sheet,
+                            controller: entity.controller,
+                            current_health: entity.current_health,
+                            max_health: entity.max_health,
+                            attack: entity.attack,
+                            facing_right: entity.facing_right,
+                        }
                     })
                     .collect();
                 
                 let messages = combat_messages;
+                
+                // Check if current player is on stairs
+                let on_stairs = game.stairs_position.map_or(false, |(sx, sy)| {
+                    game.entities.iter().any(|e| e.id == player_id_clone && e.x == sx && e.y == sy)
+                });
                 
                 let update = serde_json::to_string(&GameUpdate {
                     map: game.dungeon.tiles.clone(),
@@ -278,6 +296,9 @@ async fn handle_socket(socket: WebSocket, state: SharedState, tx: Tx) {
                     width: game.dungeon.width,
                     height: game.dungeon.height,
                     messages,
+                    stairs_position: game.stairs_position,
+                    on_stairs,
+                    level_complete,
                 }).unwrap();
                 let _ = tx.send(update);
             }
@@ -354,6 +375,17 @@ fn create_default_config() -> config::GameConfig {
     ]);
     floor_stone.sprite_sheet = Some("tiles.png".to_string());
     objects.push(floor_stone);
+    
+    // Stairs (goal object - not a tile!)
+    let mut stairs = GameObject::new(
+        "stairs".to_string(),
+        "Stairs Down".to_string(),
+        "goal".to_string(),  // New type: "goal" instead of "tile"
+        true,  // Walkable (players can step on it)
+        0, 7,  // Default sprite - should be set via editor
+    );
+    stairs.sprite_sheet = Some("tiles.png".to_string());
+    objects.push(stairs);
     
     // Character/Player
     let mut player = GameObject::new(

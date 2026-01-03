@@ -80,6 +80,7 @@ class GameObjectEditor:
         button_frame = ttk.Frame(bottom_frame)
         button_frame.pack(side=tk.LEFT)
         ttk.Button(button_frame, text="Restart Server", command=self.restart_server).pack(side=tk.LEFT, padx=5)
+        ttk.Button(button_frame, text="Shutdown Server", command=self.shutdown_server).pack(side=tk.LEFT, padx=5)
         self.server_status_label = ttk.Label(button_frame, text="Server: Unknown", foreground="gray")
         self.server_status_label.pack(side=tk.LEFT, padx=10)
         
@@ -194,7 +195,7 @@ class GameObjectEditor:
         if "object_type" in self.prop_widgets:
             self.prop_widgets["object_type"].grid_remove()
         type_combo = ttk.Combobox(middle_panel, textvariable=self.prop_vars["object_type"][0], 
-                                  values=["tile", "character", "item"], width=17)
+                                  values=["tile", "character", "item", "goal"], width=17)
         type_combo.grid(row=2, column=1, sticky=(tk.W, tk.E), pady=5)
         type_combo.bind("<<ComboboxSelected>>", lambda e: self._on_object_type_changed())
         # Update the widget reference to point to the Combobox
@@ -1377,6 +1378,26 @@ class GameObjectEditor:
         if pid:
             self.server_status_label.config(text="Server: Running", foreground="green")
         else:
+            self.server_status_label.config(text="Server: Stopped", foreground="red")
+    
+    def shutdown_server(self):
+        """Shutdown the server process"""
+        pid = self.find_server_process()
+        if pid:
+            if messagebox.askyesno("Shutdown Server", "Are you sure you want to shutdown the server?"):
+                self.server_status_label.config(text="Server: Shutting down...", foreground="orange")
+                self.root.update()
+                if self.kill_server_process(pid):
+                    self.log_status("Server shutdown successfully", "success")
+                    self.server_status_label.config(text="Server: Stopped", foreground="red")
+                else:
+                    self.log_status("Failed to shutdown server", "error")
+                    self.server_status_label.config(text="Server: Error", foreground="red")
+                self.check_server_status()
+            else:
+                self.log_status("Server shutdown cancelled", "info")
+        else:
+            self.log_status("Server is not running", "warning")
             self.server_status_label.config(text="Server: Stopped", foreground="red")
     
     def restart_server(self):

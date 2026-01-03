@@ -1,4 +1,4 @@
-use crate::dungeon::Dungeon;
+use crate::dungeon::{Dungeon, Room};
 use crate::tile_registry::TileRegistry;
 use crate::game_object_registry::GameObjectRegistry;
 use serde::{Deserialize, Serialize};
@@ -15,6 +15,8 @@ pub struct CombatMessage {
 #[derive(Deserialize)]
 pub struct PlayerCommand {
     pub action: String,
+    #[serde(default)]
+    pub confirm_stairs: Option<bool>,  // Optional confirmation for stairs
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -84,6 +86,8 @@ pub struct GameState {
     #[allow(dead_code)]
     pub tile_registry: TileRegistry,
     pub object_registry: GameObjectRegistry,
+    pub stairs_position: Option<(usize, usize)>,  // Position of stairs (goal tile)
+    pub player_confirmations: std::collections::HashSet<String>,  // Players who confirmed they want to end level
 }
 
 impl GameState {
@@ -178,12 +182,96 @@ impl GameState {
         }
         
         println!("Total entities created: {} (player + monsters)", entities.len());
+        
+        // Place stairs in the room farthest from player spawn
+        let stairs_pos = Self::place_stairs(&dungeon, player_x, player_y, &object_registry);
+        if stairs_pos.is_some() {
+            println!("Stairs successfully placed at {:?}", stairs_pos);
+        } else {
+            println!("WARNING: Failed to place stairs!");
+        }
+        
         Self {
             dungeon,
             entities,
             tile_registry,
             object_registry,
+            stairs_position: stairs_pos,
+            player_confirmations: std::collections::HashSet::new(),
         }
+    }
+    
+    fn place_stairs(
+        dungeon: &Dungeon,
+        player_x: usize,
+        player_y: usize,
+        object_registry: &GameObjectRegistry,
+    ) -> Option<(usize, usize)> {
+        // Find stairs object (should be type "goal" or "item", not "tile")
+        let stairs_obj = object_registry.get_object("stairs");
+        if stairs_obj.is_none() {
+            println!("No stairs object found in config. Skipping stairs placement.");
+            return None;
+        }
+        
+        // Verify it's not a tile type
+        let obj = stairs_obj.unwrap();
+        if obj.object_type == "tile" {
+            println!("Warning: Stairs should not be a tile type. It should be 'goal' or 'item' type.");
+        }
+        
+        // Find the room farthest from player spawn
+        let mut farthest_room: Option<&Room> = None;
+        let mut max_distance = 0;
+        
+        for room in &dungeon.rooms {
+            // Calculate distance from player to room center
+            let room_center_x = room.x + room.width / 2;
+            let room_center_y = room.y + room.height / 2;
+            
+            // Use Manhattan distance
+            let dx = if player_x > room_center_x { player_x - room_center_x } else { room_center_x - player_x };
+            let dy = if player_y > room_center_y { player_y - room_center_y } else { room_center_y - player_y };
+            let distance = dx + dy;
+            
+            if distance > max_distance {
+                max_distance = distance;
+                farthest_room = Some(room);
+            }
+        }
+        
+        if let Some(room) = farthest_room {
+            println!("Found farthest room at ({}, {}) size {}x{}", room.x, room.y, room.width, room.height);
+            // Find a walkable position in the center of the farthest room
+            let center_x = room.x + room.width / 2;
+            let center_y = room.y + room.height / 2;
+            
+            println!("Searching for walkable tile in room center ({}, {})", center_x, center_y);
+            
+            // Try center first, then search nearby
+            for offset in 0..=5 {  // Increased search radius
+                for dy in -(offset as i32)..=(offset as i32) {
+                    for dx in -(offset as i32)..=(offset as i32) {
+                        let x = (center_x as i32 + dx) as usize;
+                        let y = (center_y as i32 + dy) as usize;
+                        
+                        if x < dungeon.width && y < dungeon.height {
+                            if dungeon.tiles[y][x].walkable {
+                                // Don't replace the tile - just return the position
+                                // The stairs will be rendered as an entity/object on top
+                                println!("Placed stairs at ({}, {}) in farthest room", x, y);
+                                return Some((x, y));
+                            }
+                        }
+                    }
+                }
+            }
+            println!("Warning: Could not find walkable tile in farthest room!");
+        } else {
+            println!("Warning: No rooms found in dungeon!");
+        }
+        
+        None
     }
     
     #[allow(dead_code)]
@@ -196,8 +284,14 @@ impl GameState {
         self.entities.iter_mut().find(|e| e.controller == EntityController::Player)
     }
 
-    pub fn handle_command(&mut self, cmd: &PlayerCommand, player_id: &str) -> Vec<CombatMessage> {
+    pub fn handle_command(&mut self, cmd: &PlayerCommand, player_id: &str) -> (Vec<CombatMessage>, bool) {
         let mut messages = Vec::new();
+        let mut level_complete = false;
+        
+        // Handle stairs confirmation if present
+        if let Some(true) = cmd.confirm_stairs {
+            level_complete = self.confirm_stairs(player_id);
+        }
         
         // Find the specific player entity by ID
         let player_idx = self.entities.iter().position(|e| e.id == player_id && e.controller == EntityController::Player);
@@ -211,7 +305,7 @@ impl GameState {
                 _ => {
                     // Still process AI even if player action is invalid
                     messages.extend(self.process_ai_turns());
-                    return messages;
+                    return (messages, false);
                 },
             };
             
@@ -237,14 +331,48 @@ impl GameState {
                 } else {
                     // No enemy, try to move
                     self.move_entity(idx, dx, dy);
+                    
+                    // Check if player stepped on stairs
+                    let new_x = self.entities[idx].x;
+                    let new_y = self.entities[idx].y;
+                    if let Some((stairs_x, stairs_y)) = self.stairs_position {
+                        if new_x == stairs_x && new_y == stairs_y {
+                            // Player stepped on stairs - they need to confirm
+                            // This will be handled by the client showing a confirmation dialog
+                            // For now, we just note that the player is on stairs
+                            println!("Player {} stepped on stairs at ({}, {})", player_id, stairs_x, stairs_y);
+                        }
+                    }
                 }
             }
         }
         
-        // After player turn, process all AI turns
-        messages.extend(self.process_ai_turns());
+        // After player turn, process all AI turns (only if level not complete)
+        if !level_complete {
+            messages.extend(self.process_ai_turns());
+        }
         
-        messages
+        (messages, level_complete)
+    }
+    
+    pub fn confirm_stairs(&mut self, player_id: &str) -> bool {
+        // Add player to confirmations
+        self.player_confirmations.insert(player_id.to_string());
+        
+        // Check if all players have confirmed
+        let all_players: Vec<String> = self.entities.iter()
+            .filter(|e| e.controller == EntityController::Player && e.is_alive())
+            .map(|e| e.id.clone())
+            .collect();
+        
+        let all_confirmed = all_players.iter().all(|pid| self.player_confirmations.contains(pid));
+        
+        if all_confirmed {
+            println!("All players confirmed. Level complete!");
+            return true;
+        }
+        
+        false
     }
     
     pub fn add_player(&mut self, player_id: String) -> Option<usize> {

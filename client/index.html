@@ -69,6 +69,11 @@
             color: #ff0000;
             font-weight: bold;
         }
+        
+        #console .message.success {
+            color: #00ff00;
+            font-weight: bold;
+        }
     </style>
 </head>
 <body>
@@ -168,8 +173,40 @@
                     height: gameState.height,
                     mapSize: gameState.map ? `${gameState.map.length}x${gameState.map[0]?.length}` : 'null',
                     entities: gameState.entities ? gameState.entities.length : 0,
-                    firstTile: gameState.map?.[0]?.[0]
+                    firstTile: gameState.map?.[0]?.[0],
+                    on_stairs: gameState.on_stairs,
+                    level_complete: gameState.level_complete,
+                    stairs_position: gameState.stairs_position
                 });
+                
+                if (gameState.stairs_position) {
+                    console.log('Stairs position:', gameState.stairs_position);
+                } else {
+                    console.log('WARNING: No stairs position in game state!');
+                }
+                
+                // Check if level is complete
+                if (gameState.level_complete) {
+                    addConsoleMessage('Level complete! All players confirmed. Preparing next level...', 'success');
+                    setTimeout(() => {
+                        location.reload(); // Reload page for next level
+                    }, 2000);
+                    return;
+                }
+                
+                // Check if player is on stairs and show confirmation dialog
+                if (gameState.on_stairs && !window.stairsConfirmationShown) {
+                    window.stairsConfirmationShown = true;
+                    const confirmed = confirm('You found the stairs! Are you sure you are done here?');
+                    if (confirmed) {
+                        // Send confirmation to server
+                        ws.send(JSON.stringify({ action: 'move_up', confirm_stairs: true }));
+                    } else {
+                        window.stairsConfirmationShown = false;
+                    }
+                } else if (!gameState.on_stairs) {
+                    window.stairsConfirmationShown = false;
+                }
                 
                 // Display combat messages
                 if (gameState.messages && gameState.messages.length > 0) {
@@ -329,6 +366,55 @@
                     }
                 }
             }
+            
+            // Draw stairs (goal object) on top of tiles and entities
+            if (gameState.stairs_position && Array.isArray(gameState.stairs_position) && gameState.stairs_position.length === 2) {
+                const stairsX = gameState.stairs_position[0];
+                const stairsY = gameState.stairs_position[1];
+                const destX = stairsX * TILE_SIZE;
+                const destY = stairsY * TILE_SIZE;
+                
+                console.log(`Rendering stairs at (${stairsX}, ${stairsY}) -> canvas (${destX}, ${destY})`);
+                
+                // Get stairs sprite from config (we'll need to load it from the stairs object)
+                // For now, use a default sprite sheet and coordinates
+                const stairsSpriteSheet = getSpriteSheet('tiles.png');
+                if (stairsSpriteSheet && stairsSpriteSheet.complete) {
+                    // Stairs sprite coordinates from config (x=7, y=16)
+                    const stairsSpriteX = 7 * SPRITE_SHEET_TILE_SIZE;
+                    const stairsSpriteY = 16 * SPRITE_SHEET_TILE_SIZE;
+                    
+                    ctx.globalCompositeOperation = 'source-over';
+                    ctx.imageSmoothingEnabled = false;
+                    ctx.drawImage(
+                        stairsSpriteSheet,
+                        stairsSpriteX, stairsSpriteY, SPRITE_SHEET_TILE_SIZE, SPRITE_SHEET_TILE_SIZE,
+                        destX, destY, TILE_SIZE, TILE_SIZE
+                    );
+                    
+                    // Also draw a bright border to make stairs more visible for debugging
+                    ctx.strokeStyle = '#00ffff';
+                    ctx.lineWidth = 3;
+                    ctx.strokeRect(destX, destY, TILE_SIZE, TILE_SIZE);
+                } else {
+                    // Fallback: draw a bright yellow rectangle for stairs (very visible)
+                    ctx.fillStyle = '#ffff00';
+                    ctx.fillRect(destX, destY, TILE_SIZE, TILE_SIZE);
+                    ctx.strokeStyle = '#ff0000';
+                    ctx.lineWidth = 3;
+                    ctx.strokeRect(destX, destY, TILE_SIZE, TILE_SIZE);
+                    // Draw "S" text on it
+                    ctx.fillStyle = '#000000';
+                    ctx.font = 'bold 24px Arial';
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+                    ctx.fillText('S', destX + TILE_SIZE / 2, destY + TILE_SIZE / 2);
+                }
+            } else {
+                if (gameState.stairs_position) {
+                    console.log('WARNING: stairs_position is not in expected format:', gameState.stairs_position);
+                }
+            }
         }
         
         // Handle keyboard input
@@ -351,7 +437,7 @@
             
             const action = keyMap[e.key.toLowerCase()];
             if (action && ws && ws.readyState === WebSocket.OPEN) {
-                ws.send(JSON.stringify({ action }));
+                ws.send(JSON.stringify({ action, confirm_stairs: null }));
             }
         });
         

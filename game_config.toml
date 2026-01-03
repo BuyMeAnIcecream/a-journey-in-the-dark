@@ -86,3 +86,14 @@ x = 7
 y = 0
 
 
+[[game_objects]]
+id = "stairs"
+name = "Stairs Down"
+object_type = "goal"
+walkable = true
+sprite_sheet = "tiles.png"
+[[game_objects.sprites]]
+x = 7
+y = 16
+
+
