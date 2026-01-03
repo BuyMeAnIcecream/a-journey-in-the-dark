@@ -221,6 +221,14 @@
             const playerSpriteSheet = getSpriteSheet(playerSpriteSheetName);
             
             // Debug logging
+            console.log('Player rendering:', {
+                spriteSheetName: playerSpriteSheetName,
+                spriteSheetLoaded: !!playerSpriteSheet,
+                spriteSheetComplete: playerSpriteSheet?.complete,
+                spriteCoords: { x: playerSpriteX, y: playerSpriteY },
+                availableSheets: Object.keys(spriteSheets)
+            });
+            
             if (!playerSpriteSheet) {
                 console.warn(`Player sprite sheet "${playerSpriteSheetName}" not loaded yet`);
             } else if (!playerSpriteSheet.complete) {

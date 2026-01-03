@@ -82,6 +82,7 @@ name = "Player Character"
 object_type = "character"
 walkable = true
 health = 100
+sprite_sheet = "rogues.png"
 sprite_x = 0
 sprite_y = 0
 
