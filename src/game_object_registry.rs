@@ -24,14 +24,6 @@ impl GameObjectRegistry {
         self.objects.get(id)
     }
 
-    pub fn get_objects_by_type(&self, object_type: &str) -> Vec<&GameObject> {
-        self.objects
-            .values()
-            .filter(|obj| obj.object_type == object_type)
-            .collect()
-    }
-
-    #[allow(dead_code)]
     pub fn get_all_objects(&self) -> Vec<&GameObject> {
         self.objects.values().collect()
     }

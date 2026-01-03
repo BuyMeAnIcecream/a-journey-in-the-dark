@@ -31,10 +31,6 @@ impl TileRegistry {
     pub fn get_object(&self, id: &str) -> Option<&GameObject> {
         self.objects.get(id)
     }
-
-    pub fn get_all_tiles(&self) -> Vec<&GameObject> {
-        self.objects.values().collect()
-    }
     
     /// Get all walkable tiles (floors)
     pub fn get_walkable_tiles(&self) -> Vec<Tile> {

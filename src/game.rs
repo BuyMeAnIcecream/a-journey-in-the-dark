@@ -3,14 +3,91 @@ use crate::tile_registry::TileRegistry;
 use crate::game_object_registry::GameObjectRegistry;
 use serde::{Deserialize, Serialize};
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct CombatMessage {
-    pub attacker: String,
-    pub target: String,
-    pub damage: u32,
-    pub target_health_after: u32,
-    pub target_died: bool,
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub enum MessageType {
+    Combat,
+    LevelEvent,
+    System,
 }
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct GameMessage {
+    pub message_type: MessageType,
+    pub text: String,  // Pre-formatted message text
+    // Optional structured data for client-side formatting if needed
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub attacker: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub target: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub damage: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub target_health_after: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub target_died: Option<bool>,
+}
+
+// Helper functions to create messages
+impl GameMessage {
+    pub fn combat(attacker: String, target: String, damage: u32, health_after: u32, died: bool) -> Self {
+        let text = if died {
+            format!("{} killed {}!", attacker, target)
+        } else {
+            format!("{} dealt {} damage to {}", attacker, damage, target)
+        };
+        
+        Self {
+            message_type: MessageType::Combat,
+            text,
+            attacker: Some(attacker),
+            target: Some(target),
+            damage: Some(damage),
+            target_health_after: Some(health_after),
+            target_died: Some(died),
+        }
+    }
+    
+    pub fn healing(item: String, target: String, amount: u32, health_after: u32) -> Self {
+        let text = format!("{} healed {} for {} HP", item, target, amount);
+        
+        Self {
+            message_type: MessageType::Combat,  // Healing is combat-related
+            text,
+            attacker: Some(item),
+            target: Some(target),
+            damage: Some(amount),
+            target_health_after: Some(health_after),
+            target_died: Some(false),
+        }
+    }
+    
+    pub fn level_event(text: String) -> Self {
+        Self {
+            message_type: MessageType::LevelEvent,
+            text,
+            attacker: None,
+            target: None,
+            damage: None,
+            target_health_after: None,
+            target_died: None,
+        }
+    }
+    
+    pub fn system(text: String) -> Self {
+        Self {
+            message_type: MessageType::System,
+            text,
+            attacker: None,
+            target: None,
+            damage: None,
+            target_health_after: None,
+            target_died: None,
+        }
+    }
+}
+
+// Legacy alias for backward compatibility during transition
+pub type CombatMessage = GameMessage;
 
 #[derive(Deserialize)]
 pub struct PlayerCommand {
@@ -75,16 +152,6 @@ impl Entity {
         self.current_health > 0
     }
     
-    #[allow(dead_code)]
-    pub fn take_damage(&mut self, damage: u32) {
-        if damage >= self.current_health {
-            self.current_health = 0;
-        } else {
-            self.current_health -= damage;
-        }
-    }
-    
-    #[allow(dead_code)]
     pub fn heal(&mut self, amount: u32) {
         self.current_health = (self.current_health + amount).min(self.max_health);
     }
@@ -94,7 +161,6 @@ pub struct GameState {
     pub dungeon: Dungeon,
     pub entities: Vec<Entity>,  // All entities (player + AI)
     pub consumables: Vec<Consumable>,  // All consumables on the map
-    #[allow(dead_code)]
     pub tile_registry: TileRegistry,
     pub object_registry: GameObjectRegistry,
     pub stairs_position: Option<(usize, usize)>,  // Position of stairs (goal tile)
@@ -332,30 +398,26 @@ impl GameState {
         
         None
     }
-    
-    #[allow(dead_code)]
-    pub fn get_player(&self) -> Option<&Entity> {
-        self.entities.iter().find(|e| e.controller == EntityController::Player)
-    }
-    
-    #[allow(dead_code)]
-    pub fn get_player_mut(&mut self) -> Option<&mut Entity> {
-        self.entities.iter_mut().find(|e| e.controller == EntityController::Player)
-    }
 
-    pub fn handle_command(&mut self, cmd: &PlayerCommand, player_id: &str) -> (Vec<CombatMessage>, bool, bool) {
+    pub fn handle_command(&mut self, cmd: &PlayerCommand, player_id: &str) -> (Vec<GameMessage>, bool, bool) {
         let mut messages = Vec::new();
         let mut level_complete = false;
         let mut restart_confirmed = false;
         
         // Handle restart confirmation if present
         if let Some(true) = cmd.confirm_restart {
-            restart_confirmed = self.confirm_restart(player_id);
+            if let Some(msg) = self.confirm_restart(player_id) {
+                messages.push(msg);
+                restart_confirmed = true;
+            }
         }
         
         // Handle stairs confirmation if present
         if let Some(true) = cmd.confirm_stairs {
-            level_complete = self.confirm_stairs(player_id);
+            if let Some(msg) = self.confirm_stairs(player_id) {
+                messages.push(msg);
+                level_complete = true;
+            }
         }
         
         // Check if all players are dead
@@ -419,14 +481,13 @@ impl GameState {
                                 let new_health = self.entities[idx].current_health;
                                 let healed_amount = new_health - old_health;
                                 
-                                // Create a healing message (use damage field to store healed amount for client display)
-                                messages.push(CombatMessage {
-                                    attacker: consumable_obj.name.clone(),
-                                    target: self.entities[idx].id.clone(),
-                                    damage: healed_amount,  // Store healed amount here for client
-                                    target_health_after: new_health,
-                                    target_died: false,
-                                });
+                                // Create a healing message
+                                messages.push(GameMessage::healing(
+                                    consumable_obj.name.clone(),
+                                    self.entities[idx].id.clone(),
+                                    healed_amount,
+                                    new_health,
+                                ));
                                 
                                 // Remove the consumable
                                 self.consumables.remove(consumable_idx);
@@ -461,7 +522,7 @@ impl GameState {
         alive_players == 0 && self.entities.iter().any(|e| e.controller == EntityController::Player)
     }
     
-    pub fn confirm_restart(&mut self, player_id: &str) -> bool {
+    pub fn confirm_restart(&mut self, player_id: &str) -> Option<GameMessage> {
         // Add player to restart confirmations
         self.restart_confirmations.insert(player_id.to_string());
         
@@ -476,10 +537,10 @@ impl GameState {
         if all_confirmed {
             // Reset the game state
             self.restart_level();
-            return true;
+            return Some(GameMessage::level_event("Level restarted!".to_string()));
         }
         
-        false
+        None
     }
     
     pub fn restart_level(&mut self) {
@@ -635,7 +696,7 @@ impl GameState {
         }
     }
     
-    pub fn confirm_stairs(&mut self, player_id: &str) -> bool {
+    pub fn confirm_stairs(&mut self, player_id: &str) -> Option<GameMessage> {
         // Add player to confirmations
         self.player_confirmations.insert(player_id.to_string());
         
@@ -648,10 +709,10 @@ impl GameState {
         let all_confirmed = all_players.iter().all(|pid| self.player_confirmations.contains(pid));
         
         if all_confirmed {
-            return true;
+            return Some(GameMessage::level_event("Level complete! All players confirmed. Preparing next level...".to_string()));
         }
         
-        false
+        None
     }
     
     pub fn add_player(&mut self, player_id: String) -> Option<usize> {
@@ -776,13 +837,21 @@ impl GameState {
             self.entities[attacker_idx].facing_right = false;
         }
         
-        Some(CombatMessage {
-            attacker: attacker_id,
-            target: target_id,
+        // Get attacker and target names for better message display
+        let attacker_name = self.object_registry.get_object(&self.entities[attacker_idx].object_id)
+            .map(|o| o.name.clone())
+            .unwrap_or_else(|| attacker_id.clone());
+        let target_name = self.object_registry.get_object(&self.entities[target_idx].object_id)
+            .map(|o| o.name.clone())
+            .unwrap_or_else(|| target_id.clone());
+        
+        Some(GameMessage::combat(
+            attacker_name,
+            target_name,
             damage,
-            target_health_after: health_after,
+            health_after,
             target_died,
-        })
+        ))
     }
     
     fn move_entity(&mut self, entity_idx: usize, dx: i32, dy: i32) {
@@ -831,7 +900,7 @@ impl GameState {
         }
     }
     
-    fn process_ai_turns(&mut self) -> Vec<CombatMessage> {
+    fn process_ai_turns(&mut self) -> Vec<GameMessage> {
         let mut messages = Vec::new();
         
         // Get all player positions for AI to chase

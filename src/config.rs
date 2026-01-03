@@ -20,17 +20,5 @@ impl GameConfig {
         Ok(())
     }
 
-    #[allow(dead_code)]
-    pub fn get_object_by_id(&self, id: &str) -> Option<&GameObject> {
-        self.game_objects.iter().find(|obj| obj.id == id)
-    }
-
-    #[allow(dead_code)]
-    pub fn get_objects_by_type(&self, object_type: &str) -> Vec<&GameObject> {
-        self.game_objects
-            .iter()
-            .filter(|obj| obj.object_type == object_type)
-            .collect()
-    }
 }
 

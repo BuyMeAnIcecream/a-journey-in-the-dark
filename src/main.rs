@@ -18,7 +18,7 @@ mod game_object_registry;
 mod tile;
 mod tile_registry;
 
-use game::{GameState, PlayerCommand, CombatMessage};
+use game::{GameState, PlayerCommand, GameMessage};
 
 type SharedState = Arc<Mutex<GameState>>;
 type Tx = broadcast::Sender<String>;
@@ -57,7 +57,7 @@ struct GameUpdate {
     consumables: Vec<ConsumableData>,  // All consumables on the map
     width: usize,
     height: usize,
-    messages: Vec<CombatMessage>,  // Combat messages for this update
+    messages: Vec<GameMessage>,  // Game messages (combat, level events, system)
     stairs_position: Option<(usize, usize)>,  // Position of stairs (goal)
     on_stairs: bool,  // Whether the current player is on stairs
     level_complete: bool,  // Whether level is complete (all players confirmed)

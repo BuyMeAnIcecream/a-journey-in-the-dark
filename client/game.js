@@ -9,25 +9,6 @@ let ws = null;
 let spriteSheets = {};
 let spriteSheetLoaded = false;
 let statusDiv = null;
-let consoleDiv = null;
-
-// Console message handling
-function addConsoleMessage(text, className = '') {
-    if (!consoleDiv) {
-        consoleDiv = document.getElementById('console');
-        if (!consoleDiv) return;
-    }
-    
-    const messageDiv = document.createElement('div');
-    messageDiv.className = `message ${className}`;
-    messageDiv.textContent = text;
-    consoleDiv.appendChild(messageDiv);
-    consoleDiv.scrollTop = consoleDiv.scrollHeight;
-    // Keep only last 50 messages
-    while (consoleDiv.children.length > 50) {
-        consoleDiv.removeChild(consoleDiv.firstChild);
-    }
-}
 
 // Load a sprite sheet
 function loadSpriteSheet(name) {
@@ -407,9 +388,15 @@ function render() {
 async function handleGameStateUpdate(newGameState) {
     gameState = newGameState;
     
-    // Check if level is complete
+    // Process all messages from server (combat, level events, system)
+    if (gameState.messages && gameState.messages.length > 0) {
+        if (window.GameConsole) {
+            window.GameConsole.processMessages(gameState.messages);
+        }
+    }
+    
+    // Check if level is complete (reload page)
     if (gameState.level_complete) {
-        addConsoleMessage('Level complete! All players confirmed. Preparing next level...', 'success');
         setTimeout(() => {
             location.reload(); // Reload page for next level
         }, 2000);
@@ -418,7 +405,6 @@ async function handleGameStateUpdate(newGameState) {
     
     // Check if restart was confirmed (level was restarted)
     if (gameState.restart_confirmed) {
-        addConsoleMessage('Level restarted!', 'success');
         window.restartConfirmationShown = false;
         return;
     }
@@ -453,31 +439,6 @@ async function handleGameStateUpdate(newGameState) {
         }
     } else if (!gameState.on_stairs) {
         window.stairsConfirmationShown = false;
-    }
-    
-    // Display combat messages
-    if (gameState.messages && gameState.messages.length > 0) {
-        gameState.messages.forEach(msg => {
-            // Find target entity to get max_health for display
-            const targetEntity = gameState.entities?.find(e => e.id === msg.target);
-            const maxHealth = targetEntity ? targetEntity.max_health : msg.target_health_after;
-            
-            if (msg.target_died) {
-                addConsoleMessage(`${msg.attacker} killed ${msg.target}!`, 'death');
-            } else if (msg.damage > 0 && msg.attacker !== msg.target && !msg.target_died) {
-                // Check if this is a healing message by checking if attacker name contains healing keywords
-                const isHealing = msg.attacker.toLowerCase().includes('potion') || 
-                                msg.attacker.toLowerCase().includes('heal') ||
-                                msg.attacker.toLowerCase().includes('health');
-                if (isHealing) {
-                    addConsoleMessage(`${msg.attacker} healed ${msg.target} for ${msg.damage} HP (${msg.target_health_after}/${maxHealth})`, 'success');
-                } else {
-                    addConsoleMessage(`${msg.attacker} dealt ${msg.damage} damage to ${msg.target} (${msg.target_health_after}/${maxHealth})`, 'combat');
-                }
-            } else {
-                addConsoleMessage(`${msg.attacker} dealt ${msg.damage} damage to ${msg.target} (${msg.target_health_after}/${maxHealth})`, 'combat');
-            }
-        });
     }
     
     // Ensure default sprite sheet is loaded first
@@ -660,7 +621,11 @@ function setupInputHandlers() {
 // Initialize the game
 function init() {
     statusDiv = document.getElementById('status');
-    consoleDiv = document.getElementById('console');
+    
+    // Initialize console
+    if (window.GameConsole) {
+        window.GameConsole.init();
+    }
     
     // Initial render to show placeholder
     render();
