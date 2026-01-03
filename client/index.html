@@ -565,7 +565,7 @@
             }
         }
         
-        // Handle keyboard input
+        // Handle keyboard input with continuous movement
         const keyMap = {
             'ArrowUp': 'move_up',
             'ArrowDown': 'move_down',
@@ -578,19 +578,80 @@
         };
         
         let keysPressed = new Set();
+        let movementInterval = null;
+        const MOVEMENT_DELAY = 150; // milliseconds between movements when holding a key
+        
+        function sendMovementCommand() {
+            if (!ws || ws.readyState !== WebSocket.OPEN) return;
+            if (keysPressed.size === 0) return;
+            
+            // Get the first pressed key (prioritize arrow keys over WASD if both are pressed)
+            let action = null;
+            const arrowKeys = ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'];
+            for (const key of arrowKeys) {
+                if (keysPressed.has(key)) {
+                    action = keyMap[key];
+                    break;
+                }
+            }
+            
+            // If no arrow key, use WASD
+            if (!action) {
+                for (const key of keysPressed) {
+                    const mapped = keyMap[key] || keyMap[key.toLowerCase()];
+                    if (mapped) {
+                        action = mapped;
+                        break;
+                    }
+                }
+            }
+            
+            if (action) {
+                ws.send(JSON.stringify({ action, confirm_stairs: null, confirm_restart: null }));
+            }
+        }
+        
+        function startMovementInterval() {
+            if (movementInterval) return; // Already running
+            
+            // Send first command immediately
+            sendMovementCommand();
+            
+            // Then send commands at regular intervals
+            movementInterval = setInterval(() => {
+                sendMovementCommand();
+            }, MOVEMENT_DELAY);
+        }
+        
+        function stopMovementInterval() {
+            if (movementInterval) {
+                clearInterval(movementInterval);
+                movementInterval = null;
+            }
+        }
         
         document.addEventListener('keydown', (e) => {
+            // Ignore if key is already pressed
             if (keysPressed.has(e.key)) return;
+            
+            // Only handle movement keys
+            if (!keyMap[e.key] && !keyMap[e.key.toLowerCase()]) return;
+            
             keysPressed.add(e.key);
             
-            const action = keyMap[e.key.toLowerCase()];
-            if (action && ws && ws.readyState === WebSocket.OPEN) {
-                ws.send(JSON.stringify({ action, confirm_stairs: null }));
+            // Start continuous movement if this is the first key
+            if (keysPressed.size === 1) {
+                startMovementInterval();
             }
         });
         
         document.addEventListener('keyup', (e) => {
             keysPressed.delete(e.key);
+            
+            // Stop continuous movement if no keys are pressed
+            if (keysPressed.size === 0) {
+                stopMovementInterval();
+            }
         });
         
         // Test canvas function removed - game rendering handles canvas now
