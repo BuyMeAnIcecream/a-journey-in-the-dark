@@ -43,6 +43,9 @@ attack = 10
 monster = false
 defense = 3
 healing_power = 0
+attack_spread_percent = 20
+crit_chance_percent = 15
+crit_damage_percent = 200
 [[game_objects.sprites]]
 x = 0
 y = 0
@@ -56,9 +59,12 @@ walkable = false
 health = 40
 sprite_sheet = "monsters.png"
 monster = true
-attack = 5
+attack = 10
 defense = 5
 healing_power = 0
+attack_spread_percent = 20
+crit_chance_percent = 10
+crit_damage_percent = 200
 [[game_objects.sprites]]
 x = 3
 y = 0
@@ -79,6 +85,9 @@ monster = true
 sprite_sheet = "monsters.png"
 defense = 3
 healing_power = 0
+attack_spread_percent = 20
+crit_chance_percent = 10
+crit_damage_percent = 200
 [[game_objects.sprites]]
 x = 2
 y = 0

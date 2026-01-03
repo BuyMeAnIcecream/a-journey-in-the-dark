@@ -47,6 +47,24 @@ impl GameMessage {
         }
     }
     
+    pub fn combat_crit(attacker: String, target: String, damage: u32, health_after: u32, died: bool) -> Self {
+        let text = if died {
+            format!("{} CRITICALLY killed {}!", attacker, target)
+        } else {
+            format!("{} CRITICALLY dealt {} damage to {}", attacker, damage, target)
+        };
+        
+        Self {
+            message_type: MessageType::Combat,
+            text,
+            attacker: Some(attacker),
+            target: Some(target),
+            damage: Some(damage),
+            target_health_after: Some(health_after),
+            target_died: Some(died),
+        }
+    }
+    
     pub fn healing(item: String, target: String, amount: u32, health_after: u32) -> Self {
         let text = format!("{} healed {} for {} HP", item, target, amount);
         
@@ -112,6 +130,9 @@ pub struct Entity {
     pub object_id: String,  // Reference to GameObject
     pub attack: i32,
     pub defense: i32,
+    pub attack_spread_percent: u32,  // Attack damage variance as percentage (0 = no variance)
+    pub crit_chance_percent: u32,  // Critical hit chance as percentage (0 = no crits)
+    pub crit_damage_percent: u32,  // Critical hit damage multiplier as percentage (100 = normal damage, 150 = 1.5x)
     pub max_health: u32,
     pub current_health: u32,
     pub controller: EntityController,
@@ -134,6 +155,9 @@ impl Entity {
         object_id: String,
         attack: i32,
         defense: i32,
+        attack_spread_percent: u32,
+        crit_chance_percent: u32,
+        crit_damage_percent: u32,
         max_health: u32,
         controller: EntityController,
     ) -> Self {
@@ -144,6 +168,9 @@ impl Entity {
             object_id,
             attack,
             defense,
+            attack_spread_percent,
+            crit_chance_percent,
+            crit_damage_percent,
             max_health,
             current_health: max_health,
             controller,
@@ -250,6 +277,30 @@ impl GameState {
                         })
                         .unwrap_or(0);
                     
+                    let attack_spread = monster_template.attack_spread_percent
+                        .or_else(|| {
+                            monster_template.properties
+                                .get("attack_spread_percent")
+                                .and_then(|s| s.parse::<u32>().ok())
+                        })
+                        .unwrap_or(20);
+                    
+                    let crit_chance = monster_template.crit_chance_percent
+                        .or_else(|| {
+                            monster_template.properties
+                                .get("crit_chance_percent")
+                                .and_then(|s| s.parse::<u32>().ok())
+                        })
+                        .unwrap_or(0);
+                    
+                    let crit_damage = monster_template.crit_damage_percent
+                        .or_else(|| {
+                            monster_template.properties
+                                .get("crit_damage_percent")
+                                .and_then(|s| s.parse::<u32>().ok())
+                        })
+                        .unwrap_or(150);  // Default 150% crit damage
+                    
                     let monster = Entity::new(
                         format!("monster_{}", monster_id_counter),
                         monster_x,
@@ -257,6 +308,9 @@ impl GameState {
                         monster_template.id.clone(),
                         attack,
                         defense,
+                        attack_spread,
+                        crit_chance,
+                        crit_damage,
                         max_health,
                         EntityController::AI,
                     );
@@ -630,6 +684,9 @@ impl GameState {
                         monster_template.id.clone(),
                         monster_template.attack.unwrap_or(5) as i32,
                         monster_template.defense.unwrap_or(0) as i32,
+                        monster_template.attack_spread_percent.unwrap_or(20),
+                        monster_template.crit_chance_percent.unwrap_or(0),
+                        monster_template.crit_damage_percent.unwrap_or(150),
                         monster_template.health.unwrap_or(20),
                         EntityController::AI,
                     );
@@ -802,6 +859,30 @@ impl GameState {
                 })
                 .unwrap_or(0);
             
+            let attack_spread = player_template.attack_spread_percent
+                .or_else(|| {
+                    player_template.properties
+                        .get("attack_spread_percent")
+                        .and_then(|s| s.parse::<u32>().ok())
+                })
+                .unwrap_or(20);
+            
+            let crit_chance = player_template.crit_chance_percent
+                .or_else(|| {
+                    player_template.properties
+                        .get("crit_chance_percent")
+                        .and_then(|s| s.parse::<u32>().ok())
+                })
+                .unwrap_or(0);
+            
+            let crit_damage = player_template.crit_damage_percent
+                .or_else(|| {
+                    player_template.properties
+                        .get("crit_damage_percent")
+                        .and_then(|s| s.parse::<u32>().ok())
+                })
+                .unwrap_or(150);  // Default 150% crit damage
+            
             let player = Entity::new(
                 player_id,
                 spawn_x,
@@ -809,6 +890,9 @@ impl GameState {
                 player_template.id.clone(),
                 attack,
                 defense,
+                attack_spread,
+                crit_chance,
+                crit_damage,
                 max_health,
                 EntityController::Player,
             );
@@ -835,14 +919,41 @@ impl GameState {
         
         // Get attacker's values before mutable borrow
         let attacker_attack = self.entities[attacker_idx].attack;
+        let attacker_spread = self.entities[attacker_idx].attack_spread_percent;
+        let attacker_crit_chance = self.entities[attacker_idx].crit_chance_percent;
+        let attacker_crit_damage = self.entities[attacker_idx].crit_damage_percent;
         let attacker_id = self.entities[attacker_idx].id.clone();
         let attacker_x = self.entities[attacker_idx].x;
         
         // Get target's defense
         let target_defense = self.entities[target_idx].defense;
         
-        // Calculate damage: attack - defense, minimum 1
-        let raw_damage = attacker_attack - target_defense;
+        // Calculate base damage with variance
+        // Apply percentage spread: base_attack * (1 ± spread_percent/100)
+        use rand::Rng;
+        let mut rng = rand::thread_rng();
+        let spread_amount = if attacker_spread > 0 {
+            // Calculate spread range: ±spread_percent% of base attack
+            let spread_range = (attacker_attack as f32 * attacker_spread as f32 / 100.0) as i32;
+            // Random value between -spread_range and +spread_range
+            rng.gen_range(-spread_range..=spread_range)
+        } else {
+            0
+        };
+        
+        let base_damage = attacker_attack + spread_amount;
+        
+        // Check for critical hit
+        let is_crit = attacker_crit_chance > 0 && rng.gen_range(0..100) < attacker_crit_chance;
+        let final_base_damage = if is_crit {
+            // Apply crit damage multiplier: base_damage * (crit_damage_percent / 100)
+            (base_damage as f32 * attacker_crit_damage as f32 / 100.0) as i32
+        } else {
+            base_damage
+        };
+        
+        // Calculate final damage: final_base_damage - defense, minimum 1
+        let raw_damage = final_base_damage - target_defense;
         let damage = raw_damage.max(1) as u32;  // Minimum 1 damage
         
         // Apply damage to target
@@ -874,13 +985,25 @@ impl GameState {
             .map(|o| o.name.clone())
             .unwrap_or_else(|| target_id.clone());
         
-        Some(GameMessage::combat(
-            attacker_name,
-            target_name,
-            damage,
-            health_after,
-            target_died,
-        ))
+        // Create combat message with crit indicator
+        let message = if is_crit {
+            GameMessage::combat_crit(
+                attacker_name,
+                target_name,
+                damage,
+                health_after,
+                target_died,
+            )
+        } else {
+            GameMessage::combat(
+                attacker_name,
+                target_name,
+                damage,
+                health_after,
+                target_died,
+            )
+        };
+        Some(message)
     }
     
     fn move_entity(&mut self, entity_idx: usize, dx: i32, dy: i32) {

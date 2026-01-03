@@ -21,6 +21,15 @@ pub struct GameObject {
     pub defense: Option<i32>,  // Defense value for entities
     #[serde(default)]
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub attack_spread_percent: Option<u32>,  // Attack damage variance as percentage (e.g., 20 = ±20%)
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub crit_chance_percent: Option<u32>,  // Critical hit chance as percentage (e.g., 15 = 15% chance)
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub crit_damage_percent: Option<u32>,  // Critical hit damage multiplier as percentage (e.g., 150 = 150% damage = 1.5x)
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub monster: Option<bool>,  // Whether this character is a monster
     #[serde(default)]
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -58,6 +67,9 @@ impl GameObject {
             health: None,
             attack: None,
             defense: None,
+            attack_spread_percent: None,
+            crit_chance_percent: None,
+            crit_damage_percent: None,
             monster: None,
             healing_power: None,
             sprites: vec![SpriteCoord { x: sprite_x, y: sprite_y }],

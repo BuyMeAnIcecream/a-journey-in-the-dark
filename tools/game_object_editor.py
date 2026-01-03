@@ -572,6 +572,9 @@ class GameObjectEditor:
                 {"name": "health", "field_type": "Option<u32>", "optional": True, "default": None, "show_for_types": ["character", "item"], "label": "Health"},
                 {"name": "attack", "field_type": "Option<i32>", "optional": True, "default": None, "show_for_types": ["character", "item"], "label": "Attack"},
                 {"name": "defense", "field_type": "Option<i32>", "optional": True, "default": None, "show_for_types": ["character", "item"], "label": "Defense"},
+                {"name": "attack_spread_percent", "field_type": "Option<u32>", "optional": True, "default": "20", "show_for_types": ["character", "item"], "label": "Attack Spread %"},
+                {"name": "crit_chance_percent", "field_type": "Option<u32>", "optional": True, "default": "0", "show_for_types": ["character", "item"], "label": "Crit Chance %"},
+                {"name": "crit_damage_percent", "field_type": "Option<u32>", "optional": True, "default": "150", "show_for_types": ["character", "item"], "label": "Crit Damage %"},
                 {"name": "monster", "field_type": "Option<bool>", "optional": True, "default": "false", "show_for_types": ["character"], "label": "Monster"},
                 {"name": "healing_power", "field_type": "Option<u32>", "optional": True, "default": None, "show_for_types": ["consumable"], "label": "Healing Power"},
                 {"name": "sprites", "field_type": "Vec<SpriteCoord>", "optional": False, "default": "[]", "show_for_types": [], "label": "Sprites"},
@@ -1399,6 +1402,27 @@ class GameObjectEditor:
                 # Remove from properties map if it was there
                 if "properties" in self.current_object and "defense" in self.current_object["properties"]:
                     del self.current_object["properties"]["defense"]
+            elif key == "attack_spread_percent":
+                val = var.get()
+                # Store attack_spread_percent as top-level property (not in properties map)
+                self.current_object["attack_spread_percent"] = int(val) if val.strip() else None
+                # Remove from properties map if it was there
+                if "properties" in self.current_object and "attack_spread_percent" in self.current_object["properties"]:
+                    del self.current_object["properties"]["attack_spread_percent"]
+            elif key == "crit_chance_percent":
+                val = var.get()
+                # Store crit_chance_percent as top-level property (not in properties map)
+                self.current_object["crit_chance_percent"] = int(val) if val.strip() else None
+                # Remove from properties map if it was there
+                if "properties" in self.current_object and "crit_chance_percent" in self.current_object["properties"]:
+                    del self.current_object["properties"]["crit_chance_percent"]
+            elif key == "crit_damage_percent":
+                val = var.get()
+                # Store crit_damage_percent as top-level property (not in properties map)
+                self.current_object["crit_damage_percent"] = int(val) if val.strip() else None
+                # Remove from properties map if it was there
+                if "properties" in self.current_object and "crit_damage_percent" in self.current_object["properties"]:
+                    del self.current_object["properties"]["crit_damage_percent"]
             elif key == "sprite_sheet":
                 val = var.get().strip()
                 if val:
