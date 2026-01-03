@@ -125,27 +125,23 @@
                     width: gameState.width,
                     height: gameState.height,
                     mapSize: gameState.map ? `${gameState.map.length}x${gameState.map[0]?.length}` : 'null',
-                    player: { 
-                        x: gameState.player_x, 
-                        y: gameState.player_y,
-                        sprite_x: gameState.player_sprite_x,
-                        sprite_y: gameState.player_sprite_y,
-                        sprite_sheet: gameState.player_sprite_sheet
-                    },
+                    entities: gameState.entities ? gameState.entities.length : 0,
                     firstTile: gameState.map?.[0]?.[0]
                 });
                 
-                // Load player's sprite sheet if specified and not already loaded
-                if (gameState.player_sprite_sheet) {
-                    console.log(`Loading player sprite sheet: ${gameState.player_sprite_sheet}`);
-                    try {
-                        await loadSpriteSheet(gameState.player_sprite_sheet);
-                        console.log(`Successfully loaded sprite sheet: ${gameState.player_sprite_sheet}`);
-                    } catch (e) {
-                        console.error(`Could not load player sprite sheet "${gameState.player_sprite_sheet}":`, e);
+                // Load sprite sheets for all entities
+                if (gameState.entities) {
+                    for (const entity of gameState.entities) {
+                        if (entity.sprite_sheet) {
+                            console.log(`Loading sprite sheet for entity ${entity.id}: ${entity.sprite_sheet}`);
+                            try {
+                                await loadSpriteSheet(entity.sprite_sheet);
+                                console.log(`Successfully loaded sprite sheet: ${entity.sprite_sheet}`);
+                            } catch (e) {
+                                console.error(`Could not load sprite sheet "${entity.sprite_sheet}":`, e);
+                            }
+                        }
                     }
-                } else {
-                    console.warn('Player sprite_sheet not specified, using default');
                 }
                 
                 render();
@@ -168,11 +164,19 @@
             canvas.width = gameState.width * TILE_SIZE;
             canvas.height = gameState.height * TILE_SIZE;
             
+            // Build a set of entity positions to skip when drawing tiles
+            const entityPositions = new Set();
+            if (gameState.entities) {
+                for (const entity of gameState.entities) {
+                    entityPositions.add(`${entity.x},${entity.y}`);
+                }
+            }
+            
             // Draw map tiles
             for (let y = 0; y < gameState.height; y++) {
                 for (let x = 0; x < gameState.width; x++) {
-                    // Skip drawing tile if player is here (will draw player on top)
-                    if (x === gameState.player_x && y === gameState.player_y) {
+                    // Skip drawing tile if an entity is here (will draw entity on top)
+                    if (entityPositions.has(`${x},${y}`)) {
                         continue;
                     }
                     
@@ -207,62 +211,48 @@
                 }
             }
             
-            // Draw player sprite from GameObject (on top of tiles)
-            const playerX = gameState.player_x || 0;
-            const playerY = gameState.player_y || 0;
-            const playerSpriteX = gameState.player_sprite_x;
-            const playerSpriteY = gameState.player_sprite_y;
-            
-            const destX = playerX * TILE_SIZE;
-            const destY = playerY * TILE_SIZE;
-            
-            // Always draw player - use sprite if available, otherwise fallback
-            const playerSpriteSheetName = gameState.player_sprite_sheet || DEFAULT_SPRITE_SHEET;
-            const playerSpriteSheet = getSpriteSheet(playerSpriteSheetName);
-            
-            // Debug logging
-            console.log('Player rendering:', {
-                spriteSheetName: playerSpriteSheetName,
-                spriteSheetLoaded: !!playerSpriteSheet,
-                spriteSheetComplete: playerSpriteSheet?.complete,
-                spriteCoords: { x: playerSpriteX, y: playerSpriteY },
-                availableSheets: Object.keys(spriteSheets)
-            });
-            
-            if (!playerSpriteSheet) {
-                console.warn(`Player sprite sheet "${playerSpriteSheetName}" not loaded yet`);
-            } else if (!playerSpriteSheet.complete) {
-                console.warn(`Player sprite sheet "${playerSpriteSheetName}" not complete yet`);
-            }
-            
-            if (playerSpriteX !== undefined && playerSpriteY !== undefined && 
-                playerSpriteSheet && playerSpriteSheet.complete) {
-                const srcX = playerSpriteX * SPRITE_SHEET_TILE_SIZE;
-                const srcY = playerSpriteY * SPRITE_SHEET_TILE_SIZE;
-                
-                // Draw player sprite from the correct sprite sheet
-                ctx.drawImage(
-                    playerSpriteSheet,
-                    srcX, srcY, SPRITE_SHEET_TILE_SIZE, SPRITE_SHEET_TILE_SIZE,
-                    destX, destY, TILE_SIZE, TILE_SIZE
-                );
-                
-                // If sprite is at (0,0) which might be black/invisible, add a visible border
-                if (playerSpriteX === 0 && playerSpriteY === 0) {
-                    ctx.strokeStyle = '#00ff00';
-                    ctx.lineWidth = 2;
-                    ctx.strokeRect(destX + 1, destY + 1, TILE_SIZE - 2, TILE_SIZE - 2);
+            // Draw all entities (player + AI) on top of tiles
+            if (gameState.entities) {
+                for (const entity of gameState.entities) {
+                    const destX = entity.x * TILE_SIZE;
+                    const destY = entity.y * TILE_SIZE;
+                    
+                    // Get sprite sheet for this entity
+                    const entitySpriteSheetName = entity.sprite_sheet || DEFAULT_SPRITE_SHEET;
+                    const entitySpriteSheet = getSpriteSheet(entitySpriteSheetName);
+                    
+                    if (entity.sprite_x !== undefined && entity.sprite_y !== undefined && 
+                        entitySpriteSheet && entitySpriteSheet.complete) {
+                        const srcX = entity.sprite_x * SPRITE_SHEET_TILE_SIZE;
+                        const srcY = entity.sprite_y * SPRITE_SHEET_TILE_SIZE;
+                        
+                        // Draw entity sprite from the correct sprite sheet
+                        ctx.drawImage(
+                            entitySpriteSheet,
+                            srcX, srcY, SPRITE_SHEET_TILE_SIZE, SPRITE_SHEET_TILE_SIZE,
+                            destX, destY, TILE_SIZE, TILE_SIZE
+                        );
+                        
+                        // Add a colored border to distinguish player from AI
+                        if (entity.controller === 'Player') {
+                            ctx.strokeStyle = '#00ff00';
+                            ctx.lineWidth = 2;
+                            ctx.strokeRect(destX + 1, destY + 1, TILE_SIZE - 2, TILE_SIZE - 2);
+                        } else if (entity.controller === 'AI') {
+                            ctx.strokeStyle = '#ff0000';
+                            ctx.lineWidth = 2;
+                            ctx.strokeRect(destX + 1, destY + 1, TILE_SIZE - 2, TILE_SIZE - 2);
+                        }
+                    } else {
+                        // Fallback to colored rectangle if sprite not available
+                        if (entity.controller === 'Player') {
+                            ctx.fillStyle = '#00ff00';
+                        } else {
+                            ctx.fillStyle = '#ff0000';
+                        }
+                        ctx.fillRect(destX, destY, TILE_SIZE, TILE_SIZE);
+                    }
                 }
-            } else {
-                // Fallback to colored rectangle if sprite not available
-                console.log('Player fallback render:', { 
-                    playerX, playerY, 
-                    playerSpriteX, playerSpriteY, 
-                    playerSpriteSheetName,
-                    spriteSheetLoaded: playerSpriteSheet?.complete 
-                });
-                ctx.fillStyle = '#00ff00';
-                ctx.fillRect(destX, destY, TILE_SIZE, TILE_SIZE);
             }
         }
         

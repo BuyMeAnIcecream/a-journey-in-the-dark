@@ -87,20 +87,33 @@ class GameObjectEditor:
         middle_panel = ttk.LabelFrame(main_frame, text="Properties", padding="10")
         middle_panel.grid(row=0, column=1, sticky=(tk.W, tk.E, tk.N, tk.S), padx=(0, 10))
         
+        # Define property schema: which properties each object type should show
+        # Properties are: (label, key, dtype, always_show, show_for_types)
+        self.property_schema = {
+            "id": ("ID:", "id", str, True, []),  # Always show
+            "name": ("Name:", "name", str, True, []),  # Always show
+            "object_type": ("Type:", "object_type", str, True, []),  # Always show
+            "walkable": ("Walkable:", "walkable", bool, False, ["tile"]),  # Only for tiles
+            "health": ("Health:", "health", int, False, ["character", "item"]),  # For entities
+            "attack": ("Attack:", "attack", int, False, ["character", "item"]),  # For entities
+            "monster": ("Monster:", "monster", bool, False, ["character"]),  # Only for characters
+            "sprite_sheet": ("Sprite Sheet:", "sprite_sheet", str, True, []),  # Always show
+        }
+        
         # Properties form
         self.prop_vars = {}
-        properties = [
-            ("ID:", "id", str),
-            ("Name:", "name", str),
-            ("Type:", "object_type", str),
-            ("Walkable:", "walkable", bool),
-            ("Health:", "health", int),
-            ("Sprite Sheet:", "sprite_sheet", str),
-        ]
+        self.prop_widgets = {}  # Store widgets for showing/hiding
+        self.prop_labels = {}  # Store labels for showing/hiding
         
-        for i, (label, key, dtype) in enumerate(properties):
-            ttk.Label(middle_panel, text=label).grid(row=i, column=0, sticky=tk.W, pady=5)
+        # Create all property fields (we'll show/hide them based on type)
+        row = 0
+        for key, (label, prop_key, dtype, always_show, show_for_types) in self.property_schema.items():
+            # Label
+            label_widget = ttk.Label(middle_panel, text=label)
+            label_widget.grid(row=row, column=0, sticky=tk.W, pady=5)
+            self.prop_labels[key] = label_widget
             
+            # Input widget
             if dtype == bool:
                 var = tk.BooleanVar()
                 widget = ttk.Checkbutton(middle_panel, variable=var)
@@ -111,29 +124,48 @@ class GameObjectEditor:
                 var = tk.StringVar()
                 widget = ttk.Entry(middle_panel, textvariable=var, width=20)
             
-            widget.grid(row=i, column=1, sticky=(tk.W, tk.E), pady=5)
+            widget.grid(row=row, column=1, sticky=(tk.W, tk.E), pady=5)
             self.prop_vars[key] = (var, dtype)
+            self.prop_widgets[key] = widget
             
             # Add auto-save on field change
             if dtype == bool:
                 var.trace_add("write", lambda *args, k=key: self._on_property_change(k))
             else:
                 var.trace_add("write", lambda *args, k=key: self._on_property_change(k))
+            
+            row += 1
         
-        # Type dropdown
+        # Type dropdown - special handling (replace the Entry widget with Combobox)
+        # Remove the Entry widget that was created for object_type
+        if "object_type" in self.prop_widgets:
+            self.prop_widgets["object_type"].grid_remove()
         type_combo = ttk.Combobox(middle_panel, textvariable=self.prop_vars["object_type"][0], 
-                                  values=["tile", "character", "item", "monster"], width=17)
+                                  values=["tile", "character", "item"], width=17)
         type_combo.grid(row=2, column=1, sticky=(tk.W, tk.E), pady=5)
+        type_combo.bind("<<ComboboxSelected>>", lambda e: self._on_object_type_changed())
+        # Update the widget reference to point to the Combobox
+        self.prop_widgets["object_type"] = type_combo
         
         # Sprite sheet dropdown (populated from available sprite sheets)
+        # Find the correct row for sprite_sheet (it's the last property in schema)
+        sprite_sheet_row = len(self.property_schema) - 1  # sprite_sheet is last
+        # Remove the Entry widget that was created for sprite_sheet
+        if "sprite_sheet" in self.prop_widgets:
+            self.prop_widgets["sprite_sheet"].grid_remove()
         sprite_sheet_combo = ttk.Combobox(middle_panel, textvariable=self.prop_vars["sprite_sheet"][0], 
                                           width=17)
-        sprite_sheet_combo.grid(row=5, column=1, sticky=(tk.W, tk.E), pady=5)
+        sprite_sheet_combo.grid(row=sprite_sheet_row, column=1, sticky=(tk.W, tk.E), pady=5)
         # Update sprite sheet dropdown when sprite sheets are refreshed
         self.sprite_sheet_prop_combo = sprite_sheet_combo
+        # Update the widget reference to point to the Combobox
+        self.prop_widgets["sprite_sheet"] = sprite_sheet_combo
+        
+        # Store reference to middle_panel for dynamic row calculation
+        self.middle_panel = middle_panel
         
         # Sprite array management
-        sprite_row = len(properties)
+        sprite_row = len(self.property_schema)  # Use property_schema length instead
         ttk.Label(middle_panel, text="Sprites (for randomization):", font=("Arial", 10, "bold")).grid(
             row=sprite_row, column=0, columnspan=2, sticky=tk.W, pady=(20, 5))
         
@@ -269,12 +301,38 @@ class GameObjectEditor:
         if level == "success":
             self.root.after(3000, lambda: self.log_status("Ready", "info"))
     
+    def _on_object_type_changed(self):
+        """Update property visibility when object type changes"""
+        if not self.current_object:
+            return
+        
+        # Get current object type
+        obj_type = self.prop_vars["object_type"][0].get()
+        if not obj_type:
+            return
+        
+        # Update property visibility
+        self._update_property_visibility(obj_type)
+    
+    def _update_property_visibility(self, obj_type):
+        """Show/hide properties based on object type"""
+        for key, (label, prop_key, dtype, always_show, show_for_types) in self.property_schema.items():
+            should_show = always_show or (obj_type in show_for_types)
+            
+            if key in self.prop_labels and key in self.prop_widgets:
+                if should_show:
+                    self.prop_labels[key].grid()
+                    self.prop_widgets[key].grid()
+                else:
+                    self.prop_labels[key].grid_remove()
+                    self.prop_widgets[key].grid_remove()
+    
     def _on_property_change(self, key):
         """Handle property change - auto-save after a short delay"""
         if not self.current_object:
             return
         # Don't auto-save when loading object into form (would cause infinite loop)
-        if hasattr(self, '_loading_object'):
+        if hasattr(self, '_loading_object') and self._loading_object:
             return
         # Debounce: cancel previous auto-save and schedule a new one
         if hasattr(self, '_auto_save_job'):
@@ -580,6 +638,10 @@ class GameObjectEditor:
         
         obj = self.current_object
         
+        # Get object type and update property visibility
+        obj_type = obj.get("object_type", "tile")
+        self._update_property_visibility(obj_type)
+        
         # Set standard properties
         for key, (var, dtype) in self.prop_vars.items():
             if key in obj:
@@ -592,7 +654,18 @@ class GameObjectEditor:
                     var.set(str(obj.get(key, "")))
             else:
                 if dtype == bool:
-                    var.set(False)
+                    # For monster checkbox, check both top-level and properties map as fallback
+                    if key == "monster":
+                        # Check both top-level and properties map
+                        monster_val = obj.get("monster")
+                        if monster_val is None:
+                            monster_val = obj.get("properties", {}).get("monster", False)
+                            # Handle string "true"/"false" from properties
+                            if isinstance(monster_val, str):
+                                monster_val = monster_val.lower() == "true"
+                        var.set(bool(monster_val))
+                    else:
+                        var.set(False)
                 else:
                     # Don't clear string fields - they might have values we want to preserve
                     var.set("")
@@ -866,6 +939,13 @@ class GameObjectEditor:
             if key == "health":
                 val = var.get()
                 self.current_object["health"] = int(val) if val.strip() else None
+            elif key == "attack":
+                val = var.get()
+                # Store attack as top-level property (not in properties map)
+                self.current_object["attack"] = int(val) if val.strip() else None
+                # Remove from properties map if it was there
+                if "properties" in self.current_object and "attack" in self.current_object["properties"]:
+                    del self.current_object["properties"]["attack"]
             elif key == "sprite_sheet":
                 val = var.get().strip()
                 if val:
@@ -876,6 +956,12 @@ class GameObjectEditor:
                         self.on_sprite_sheet_change()
                 # Don't remove sprite_sheet if it exists - preserve it even if form field is empty
                 # Only update if a new value is provided
+            elif key == "monster":
+                # Store monster as top-level boolean property (not in properties map)
+                self.current_object["monster"] = var.get()
+                # Remove from properties map if it was there
+                if "properties" in self.current_object and "monster" in self.current_object["properties"]:
+                    del self.current_object["properties"]["monster"]
             elif dtype == bool:
                 self.current_object[key] = var.get()
             elif dtype == int:

@@ -24,13 +24,23 @@ type SharedState = Arc<Mutex<GameState>>;
 type Tx = broadcast::Sender<String>;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
+struct EntityData {
+    id: String,
+    x: usize,
+    y: usize,
+    sprite_x: u32,
+    sprite_y: u32,
+    sprite_sheet: Option<String>,
+    controller: crate::game::EntityController,
+    current_health: u32,
+    max_health: u32,
+    attack: i32,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
 struct GameUpdate {
     map: Vec<Vec<crate::tile::Tile>>,
-    player_x: usize,
-    player_y: usize,
-    player_sprite_x: u32,
-    player_sprite_y: u32,
-    player_sprite_sheet: Option<String>,  // Which sprite sheet the player uses
+    entities: Vec<EntityData>,  // All entities (player + AI)
     width: usize,
     height: usize,
 }
@@ -107,21 +117,34 @@ async fn handle_socket(socket: WebSocket, state: SharedState, tx: Tx) {
     // Send initial game state
     let initial_state = {
         let game = state.lock().unwrap();
-        // Get player sprite from GameObject
-        let player_obj = game.object_registry.get_object(&game.player.object_id);
-        let (player_sprite_x, player_sprite_y) = player_obj
-            .and_then(|obj| obj.get_sprites_vec().first().map(|s| (s.x, s.y)))
-            .unwrap_or((0, 0));
-        let player_sprite_sheet = player_obj
-            .and_then(|obj| obj.sprite_sheet.clone());
+        // Convert entities to EntityData
+        let entities: Vec<EntityData> = game.entities.iter()
+            .filter(|e| e.is_alive())  // Only send alive entities
+            .map(|entity| {
+                let obj = game.object_registry.get_object(&entity.object_id);
+                let (sprite_x, sprite_y) = obj
+                    .and_then(|o| o.get_sprites_vec().first().map(|s| (s.x, s.y)))
+                    .unwrap_or((0, 0));
+                let sprite_sheet = obj.and_then(|o| o.sprite_sheet.clone());
+                
+                EntityData {
+                    id: entity.id.clone(),
+                    x: entity.x,
+                    y: entity.y,
+                    sprite_x,
+                    sprite_y,
+                    sprite_sheet,
+                    controller: entity.controller,
+                    current_health: entity.current_health,
+                    max_health: entity.max_health,
+                    attack: entity.attack,
+                }
+            })
+            .collect();
         
         serde_json::to_string(&GameUpdate {
             map: game.dungeon.tiles.clone(),
-            player_x: game.player.x,
-            player_y: game.player.y,
-            player_sprite_x,
-            player_sprite_y,
-            player_sprite_sheet,
+            entities,
             width: game.dungeon.width,
             height: game.dungeon.height,
         })
@@ -146,20 +169,34 @@ async fn handle_socket(socket: WebSocket, state: SharedState, tx: Tx) {
                 game.handle_command(&cmd);
                 
                 // Broadcast update
-                let player_obj = game.object_registry.get_object(&game.player.object_id);
-                let (player_sprite_x, player_sprite_y) = player_obj
-                    .and_then(|obj| obj.get_sprites_vec().first().map(|s| (s.x, s.y)))
-                    .unwrap_or((0, 0));
-                let player_sprite_sheet = player_obj
-                    .and_then(|obj| obj.sprite_sheet.clone());
+                // Convert entities to EntityData
+                let entities: Vec<EntityData> = game.entities.iter()
+                    .filter(|e| e.is_alive())  // Only send alive entities
+                    .map(|entity| {
+                        let obj = game.object_registry.get_object(&entity.object_id);
+                        let (sprite_x, sprite_y) = obj
+                            .and_then(|o| o.get_sprites_vec().first().map(|s| (s.x, s.y)))
+                            .unwrap_or((0, 0));
+                        let sprite_sheet = obj.and_then(|o| o.sprite_sheet.clone());
+                        
+                        EntityData {
+                            id: entity.id.clone(),
+                            x: entity.x,
+                            y: entity.y,
+                            sprite_x,
+                            sprite_y,
+                            sprite_sheet,
+                            controller: entity.controller,
+                            current_health: entity.current_health,
+                            max_health: entity.max_health,
+                            attack: entity.attack,
+                        }
+                    })
+                    .collect();
                 
                 let update = serde_json::to_string(&GameUpdate {
                     map: game.dungeon.tiles.clone(),
-                    player_x: game.player.x,
-                    player_y: game.player.y,
-                    player_sprite_x,
-                    player_sprite_y,
-                    player_sprite_sheet,
+                    entities,
                     width: game.dungeon.width,
                     height: game.dungeon.height,
                 }).unwrap();
@@ -249,6 +286,7 @@ fn create_default_config() -> config::GameConfig {
     )
     .with_health(100);
     player.sprite_sheet = Some("rogues.png".to_string());
+    player.properties.insert("attack".to_string(), "10".to_string());
     objects.push(player);
     
     config::GameConfig { game_objects: objects }

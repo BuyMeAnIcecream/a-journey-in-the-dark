@@ -3,6 +3,7 @@ id = "wall_dirt_top"
 name = "Dirt Wall (Top)"
 object_type = "tile"
 walkable = false
+sprite_sheet = "tiles.png"
 [[game_objects.sprites]]
 x = 0
 y = 0
@@ -38,8 +39,26 @@ object_type = "character"
 walkable = true
 sprite_sheet = "rogues.png"
 health = 100
+attack = 5
+monster = false
 [[game_objects.sprites]]
 x = 0
+y = 0
+
+
+[game_objects.properties]
+attack = "10"
+[[game_objects]]
+id = "orc"
+name = "Orc"
+object_type = "character"
+walkable = false
+health = 10
+sprite_sheet = "monsters.png"
+monster = true
+attack = 5
+[[game_objects.sprites]]
+x = 3
 y = 0
 
 
