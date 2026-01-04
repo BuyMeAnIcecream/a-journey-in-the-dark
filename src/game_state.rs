@@ -9,6 +9,12 @@ use crate::map_generator::MapGenerator;
 use crate::combat::attack_entity;
 use crate::ai::process_ai_turns;
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum TurnPhase {
+    PlayerPhase,  // Players are taking their turns
+    AIPhase,      // AI entities are taking their turns
+}
+
 pub struct GameState {
     pub dungeon: Dungeon,
     pub entities: Vec<Entity>,  // All entities (player + AI)
@@ -19,6 +25,9 @@ pub struct GameState {
     pub stairs_position: Option<(usize, usize)>,  // Position of stairs (goal tile)
     pub player_confirmations: std::collections::HashSet<String>,  // Players who confirmed they want to end level
     pub restart_confirmations: std::collections::HashSet<String>,  // Players who confirmed they want to restart after death
+    pub turn_phase: TurnPhase,  // Current phase of the turn
+    pub players_acted_this_turn: std::collections::HashSet<String>,  // Players who have taken their turn this round
+    pub current_turn: u32,  // Current turn number
 }
 
 impl GameState {
@@ -36,6 +45,9 @@ impl GameState {
             stairs_position: stairs_pos,
             player_confirmations: std::collections::HashSet::new(),
             restart_confirmations: std::collections::HashSet::new(),
+            turn_phase: TurnPhase::PlayerPhase,
+            players_acted_this_turn: std::collections::HashSet::new(),
+            current_turn: 1,
         }
     }
 
@@ -44,22 +56,6 @@ impl GameState {
         let mut level_complete = false;
         let mut restart_confirmed = false;
         
-        // Handle restart confirmation if present
-        if let Some(true) = cmd.confirm_restart {
-            if let Some(msg) = self.confirm_restart(player_id) {
-                messages.push(msg);
-                restart_confirmed = true;
-            }
-        }
-        
-        // Handle stairs confirmation if present
-        if let Some(true) = cmd.confirm_stairs {
-            if let Some(msg) = self.confirm_stairs(player_id) {
-                messages.push(msg);
-                level_complete = true;
-            }
-        }
-        
         // Check if all players are dead
         let all_players_dead = self.are_all_players_dead();
         
@@ -67,6 +63,37 @@ impl GameState {
         if all_players_dead {
             self.restart_level();
             messages.push(GameMessage::level_event("All players died! Level restarted.".to_string()));
+            return (messages, level_complete, restart_confirmed);
+        }
+        
+        // Handle restart confirmation if present (allowed outside of turn)
+        if let Some(true) = cmd.confirm_restart {
+            if let Some(msg) = self.confirm_restart(player_id) {
+                messages.push(msg);
+                restart_confirmed = true;
+            }
+            return (messages, level_complete, restart_confirmed);
+        }
+        
+        // Handle stairs confirmation if present (allowed outside of turn)
+        if let Some(true) = cmd.confirm_stairs {
+            if let Some(msg) = self.confirm_stairs(player_id) {
+                messages.push(msg);
+                level_complete = true;
+            }
+            return (messages, level_complete, restart_confirmed);
+        }
+        
+        // For movement commands, check if it's the player's turn and they haven't acted yet
+        // Check if it's the player's turn and they haven't acted yet
+        if self.turn_phase != TurnPhase::PlayerPhase {
+            // Not player phase, ignore movement commands
+            return (messages, level_complete, restart_confirmed);
+        }
+        
+        // Check if this player has already taken their turn
+        if self.players_acted_this_turn.contains(player_id) {
+            // Player already acted this turn, ignore command
             return (messages, level_complete, restart_confirmed);
         }
         
@@ -195,11 +222,32 @@ impl GameState {
                     }
                 }
             }
-        }
-        
-        // After player turn, process all AI turns (only if level not complete and not all players dead)
-        if !level_complete && !self.are_all_players_dead() {
-            messages.extend(process_ai_turns(&mut self.entities, &self.dungeon, &self.object_registry, &mut self.consumables));
+            
+            // Mark this player as having acted this turn (after any action: move, attack, or chest open)
+            self.players_acted_this_turn.insert(player_id.to_string());
+            
+            // Check if all alive players have taken their turn
+            let alive_players: Vec<String> = self.entities.iter()
+                .filter(|e| e.controller == EntityController::Player && e.is_alive())
+                .map(|e| e.id.clone())
+                .collect();
+            
+            let all_players_acted = !alive_players.is_empty() && 
+                alive_players.iter().all(|pid| self.players_acted_this_turn.contains(pid));
+            
+            if all_players_acted {
+                // All players have acted, now process AI turns
+                self.turn_phase = TurnPhase::AIPhase;
+                
+                if !level_complete && !self.are_all_players_dead() {
+                    messages.extend(process_ai_turns(&mut self.entities, &self.dungeon, &self.object_registry, &mut self.consumables));
+                }
+                
+                // Start next turn
+                self.turn_phase = TurnPhase::PlayerPhase;
+                self.players_acted_this_turn.clear();
+                self.current_turn += 1;
+            }
         }
         
         (messages, level_complete, restart_confirmed)
@@ -243,6 +291,11 @@ impl GameState {
         // Clear confirmations
         self.player_confirmations.clear();
         self.restart_confirmations.clear();
+        
+        // Reset turn system
+        self.turn_phase = TurnPhase::PlayerPhase;
+        self.players_acted_this_turn.clear();
+        self.current_turn = 1;
         
         // Remove all entities, consumables, and chests
         self.entities.clear();

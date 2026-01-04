@@ -531,7 +531,18 @@ function updatePlayerList() {
         const color = isCurrentPlayer ? '#00ff00' : (player.is_alive ? '#fff' : '#888');
         const style = isCurrentPlayer ? 'font-weight: bold;' : '';
         const status = player.is_alive ? '●' : '✕';
-        html += `<div style="color: ${color}; ${style}">${status} ${player.name}</div>`;
+        
+        // Show turn status
+        let turnStatus = '';
+        if (player.is_alive) {
+            if (player.has_acted_this_turn) {
+                turnStatus = ' <span style="color: #888; font-size: 10px;">(acted)</span>';
+            } else if (gameState.turn_phase === 'player') {
+                turnStatus = ' <span style="color: #ffff00; font-size: 10px;">(turn)</span>';
+            }
+        }
+        
+        html += `<div style="color: ${color}; ${style}">${status} ${player.name}${turnStatus}</div>`;
     }
     
     playerListDiv.innerHTML = html;
@@ -626,11 +637,42 @@ async function handleGameStateUpdate(newGameState) {
         myPlayerId = gameState.current_player_id;
     }
     
+    // Calculate is_my_turn based on our own player data (not the broadcast value)
+    // This ensures each client gets the correct value
+    const myPlayer = gameState.players && myPlayerId 
+        ? gameState.players.find(p => p.id === myPlayerId)
+        : null;
+    
+    const calculatedIsMyTurn = myPlayer && 
+        gameState.turn_phase === 'player' && 
+        !myPlayer.has_acted_this_turn && 
+        myPlayer.is_alive;
+    
+    // Override the broadcast is_my_turn with our calculated value
+    gameState.is_my_turn = calculatedIsMyTurn || false;
+    
     // Update health bar
     updateHealthBar();
     
     // Update player list
     updatePlayerList();
+    
+    // Update status message with turn info
+    if (statusDiv) {
+        if (gameState.is_my_turn) {
+            statusDiv.textContent = `Turn ${gameState.current_turn} - Your turn!`;
+        } else if (gameState.turn_phase === 'ai') {
+            statusDiv.textContent = `Turn ${gameState.current_turn} - AI phase...`;
+        } else {
+            statusDiv.textContent = `Turn ${gameState.current_turn} - Waiting for other players...`;
+        }
+    }
+    
+    // Stop movement if it's not the player's turn
+    if (!gameState.is_my_turn) {
+        stopMovementInterval();
+        keysPressed.clear();
+    }
     
     // Process all messages from server (combat, level events, system)
     if (gameState.messages && gameState.messages.length > 0) {
@@ -716,8 +758,15 @@ async function handleGameStateUpdate(newGameState) {
     // Wait for all sprite sheets to load before rendering
     await Promise.all(spriteSheetPromises);
     
+    // Update status message with turn info
     if (statusDiv) {
-        statusDiv.textContent = 'Connected - Rendering...';
+        if (gameState.is_my_turn) {
+            statusDiv.textContent = `Turn ${gameState.current_turn} - Your turn!`;
+        } else if (gameState.turn_phase === 'ai') {
+            statusDiv.textContent = `Turn ${gameState.current_turn} - AI phase...`;
+        } else {
+            statusDiv.textContent = `Turn ${gameState.current_turn} - Waiting for other players...`;
+        }
     }
     
     // Update health bar
@@ -790,6 +839,12 @@ function sendMovementCommand() {
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
     if (keysPressed.size === 0) return;
     
+    // Check if it's the player's turn
+    if (gameState && !gameState.is_my_turn) {
+        // Not player's turn, don't send movement
+        return;
+    }
+    
     // Get the first pressed key (prioritize arrow keys over WASD if both are pressed)
     let action = null;
     const arrowKeys = ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'];
@@ -813,17 +868,32 @@ function sendMovementCommand() {
     
     if (action) {
         ws.send(JSON.stringify({ action, confirm_stairs: null, confirm_restart: null }));
+        // Stop movement interval after sending command - wait for server response
+        // The interval will restart if it's still our turn
+        stopMovementInterval();
+        keysPressed.clear();
     }
 }
 
 function startMovementInterval() {
     if (movementInterval) return; // Already running
     
+    // Check if it's still our turn before starting
+    if (gameState && !gameState.is_my_turn) {
+        return; // Not our turn, don't start
+    }
+    
     // Send first command immediately
     sendMovementCommand();
     
-    // Then send commands at regular intervals
+    // Then send commands at regular intervals (only if still our turn)
     movementInterval = setInterval(() => {
+        // Check again before each command
+        if (gameState && !gameState.is_my_turn) {
+            stopMovementInterval();
+            keysPressed.clear();
+            return;
+        }
         sendMovementCommand();
     }, MOVEMENT_DELAY);
 }
@@ -842,6 +912,12 @@ function setupInputHandlers() {
         
         // Only handle movement keys
         if (!keyMap[e.key] && !keyMap[e.key.toLowerCase()]) return;
+        
+        // Check if it's the player's turn
+        if (gameState && !gameState.is_my_turn) {
+            // Not player's turn, ignore input
+            return;
+        }
         
         keysPressed.add(e.key);
         

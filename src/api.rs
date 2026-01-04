@@ -65,6 +65,7 @@ pub struct PlayerData {
     pub id: String,
     pub name: String,  // Display name (from GameObject or player_id)
     pub is_alive: bool,
+    pub has_acted_this_turn: bool,  // Whether this player has taken their turn this round
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -83,6 +84,9 @@ pub struct GameUpdate {
     pub level_complete: bool,  // Whether level is complete (all players confirmed)
     pub all_players_dead: bool,  // Whether all players are dead
     pub restart_confirmed: bool,  // Whether all players confirmed restart
+    pub turn_phase: String,  // Current turn phase: "player" or "ai"
+    pub current_turn: u32,  // Current turn number
+    pub is_my_turn: bool,  // Whether it's the current player's turn (they haven't acted yet)
 }
 
 /// Convert GameState to GameUpdate for a specific player
@@ -213,13 +217,26 @@ pub fn game_state_to_update(
                 .map(|obj| obj.name.clone())
                 .unwrap_or_else(|| entity.id.clone());
             
+            // Check if this player has acted this turn
+            let has_acted = game.players_acted_this_turn.contains(&entity.id);
+            
             PlayerData {
                 id: entity.id.clone(),
                 name,
                 is_alive: entity.is_alive(),
+                has_acted_this_turn: has_acted,
             }
         })
         .collect();
+    
+    // Determine if it's the current player's turn
+    let is_my_turn = if let Some(pid) = player_id {
+        game.turn_phase == crate::game_state::TurnPhase::PlayerPhase &&
+        !game.players_acted_this_turn.contains(pid) &&
+        game.entities.iter().any(|e| e.id == pid && e.controller == EntityController::Player && e.is_alive())
+    } else {
+        false
+    };
     
     GameUpdate {
         map: game.dungeon.tiles.clone(),
@@ -236,6 +253,12 @@ pub fn game_state_to_update(
         level_complete: false,
         all_players_dead: game.are_all_players_dead(),
         restart_confirmed: false,
+        turn_phase: match game.turn_phase {
+            crate::game_state::TurnPhase::PlayerPhase => "player".to_string(),
+            crate::game_state::TurnPhase::AIPhase => "ai".to_string(),
+        },
+        current_turn: game.current_turn,
+        is_my_turn,
     }
 }
 
