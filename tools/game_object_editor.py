@@ -42,6 +42,11 @@ class GameObjectEditor:
         self.server_process = None  # Reference to running server process
         self.schema = None  # Dynamic schema loaded from server
         
+        # Fullscreen map preview
+        self.level_map_fullscreen_window = None
+        self.level_map_fullscreen_canvas = None
+        self.level_map_fullscreen_zoom_level = 1.0
+        
         # Load schema first (needed for UI creation)
         self.load_schema()
         
@@ -56,9 +61,6 @@ class GameObjectEditor:
         
         self.refresh_sprite_sheets()  # Populate sprite sheet list
         self.load_sprite_sheet()  # Load default sprite sheet
-        # Refresh tile palette after UI is created and config is loaded
-        if hasattr(self, 'tile_palette_listbox'):
-            self.refresh_tile_palette()
         
     def create_ui(self):
         # Main container
@@ -73,15 +75,15 @@ class GameObjectEditor:
         self.objects_tab = ttk.Frame(self.notebook, padding="10")
         self.notebook.add(self.objects_tab, text="Game Objects")
         
-        # Create Map Editor tab
-        self.map_tab = ttk.Frame(self.notebook, padding="10")
-        self.notebook.add(self.map_tab, text="Map Editor")
+        # Create Level Editor tab
+        self.level_tab = ttk.Frame(self.notebook, padding="10")
+        self.notebook.add(self.level_tab, text="Level Editor")
         
         # Build Game Objects tab UI
         self.create_objects_tab_ui()
         
-        # Build Map Editor tab UI
-        self.create_map_tab_ui()
+        # Build Level Editor tab UI
+        self.create_level_tab_ui()
         
         # Bottom - Action buttons and status (shared across tabs)
         bottom_frame = ttk.Frame(main_frame)
@@ -355,102 +357,6 @@ class GameObjectEditor:
         self.objects_tab.columnconfigure(1, weight=1)
         self.objects_tab.rowconfigure(0, weight=1)
     
-    def create_map_tab_ui(self):
-        """Create the UI for the Map Editor tab"""
-        # Left panel - Tile palette
-        left_panel = ttk.LabelFrame(self.map_tab, text="Tile Palette", padding="10")
-        left_panel.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S), padx=(0, 10))
-        
-        ttk.Label(left_panel, text="Select a tile to place:", font=("Arial", 10, "bold")).pack(anchor=tk.W, pady=(0, 10))
-        
-        # Tile list with scrollbar
-        list_frame = ttk.Frame(left_panel)
-        list_frame.pack(fill=tk.BOTH, expand=True)
-        
-        scrollbar = ttk.Scrollbar(list_frame)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        
-        self.tile_palette_listbox = tk.Listbox(list_frame, yscrollcommand=scrollbar.set, width=25)
-        self.tile_palette_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        self.tile_palette_listbox.bind('<<ListboxSelect>>', self.on_tile_palette_select)
-        scrollbar.config(command=self.tile_palette_listbox.yview)
-        
-        # Map controls
-        controls_frame = ttk.LabelFrame(self.map_tab, text="Map Controls", padding="10")
-        controls_frame.grid(row=0, column=1, sticky=(tk.W, tk.E, tk.N, tk.S), padx=(0, 10))
-        
-        ttk.Button(controls_frame, text="Generate Procedural Map", command=self.generate_procedural_map, 
-                  style="Accent.TButton").pack(fill=tk.X, pady=5)
-        ttk.Separator(controls_frame, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=10)
-        ttk.Label(controls_frame, text="Map Preview Only", font=("Arial", 9), foreground="gray").pack(pady=5)
-        
-        # Map info
-        info_frame = ttk.LabelFrame(controls_frame, text="Map Info", padding="5")
-        info_frame.pack(fill=tk.X, pady=(20, 0))
-        
-        ttk.Label(info_frame, text="Width:").pack(anchor=tk.W)
-        self.map_width_var = tk.StringVar(value="80")
-        ttk.Entry(info_frame, textvariable=self.map_width_var, width=15).pack(fill=tk.X, pady=2)
-        
-        ttk.Label(info_frame, text="Height:").pack(anchor=tk.W, pady=(10, 0))
-        self.map_height_var = tk.StringVar(value="50")
-        ttk.Entry(info_frame, textvariable=self.map_height_var, width=15).pack(fill=tk.X, pady=2)
-        
-        # Right panel - Map canvas
-        right_panel = ttk.LabelFrame(self.map_tab, text="Map", padding="10")
-        right_panel.grid(row=0, column=2, sticky=(tk.W, tk.E, tk.N, tk.S))
-        
-        # Canvas with scrollbars for map
-        canvas_frame = ttk.Frame(right_panel)
-        canvas_frame.pack(fill=tk.BOTH, expand=True)
-        
-        # Scrollbars
-        v_scrollbar = ttk.Scrollbar(canvas_frame, orient=tk.VERTICAL)
-        v_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        
-        h_scrollbar = ttk.Scrollbar(canvas_frame, orient=tk.HORIZONTAL)
-        h_scrollbar.pack(side=tk.BOTTOM, fill=tk.X)
-        
-        self.map_canvas = tk.Canvas(canvas_frame, width=600, height=600, bg="black",
-                                    yscrollcommand=v_scrollbar.set,
-                                    xscrollcommand=h_scrollbar.set)
-        self.map_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        
-        v_scrollbar.config(command=self.map_canvas.yview)
-        h_scrollbar.config(command=self.map_canvas.xview)
-        
-        # Map zoom controls
-        zoom_frame = ttk.Frame(right_panel)
-        zoom_frame.pack(fill=tk.X, pady=(10, 0))
-        
-        ttk.Button(zoom_frame, text="Zoom In (+)", command=self.map_zoom_in, width=12).pack(side=tk.LEFT, padx=2)
-        ttk.Button(zoom_frame, text="Zoom Out (-)", command=self.map_zoom_out, width=12).pack(side=tk.LEFT, padx=2)
-        ttk.Button(zoom_frame, text="Reset (1x)", command=self.map_zoom_reset, width=12).pack(side=tk.LEFT, padx=2)
-        self.map_zoom_label = ttk.Label(zoom_frame, text="Zoom: 100%")
-        self.map_zoom_label.pack(side=tk.LEFT, padx=(10, 0))
-        
-        # Map canvas mouse wheel support for zoom
-        self.map_canvas.bind("<MouseWheel>", self.on_map_mousewheel)  # Windows/Linux
-        self.map_canvas.bind("<Button-4>", lambda e: self.map_zoom_in())  # macOS scroll up
-        self.map_canvas.bind("<Button-5>", lambda e: self.map_zoom_out())  # macOS scroll down
-        # Make canvas focusable for mouse wheel
-        self.map_canvas.bind("<Enter>", lambda e: self.map_canvas.focus_set())
-        self.map_canvas.bind("<Leave>", lambda e: self.root.focus_set())
-        
-        # Map data
-        self.map_data = None  # Will be a 2D list of tile IDs
-        self.map_width = 80
-        self.map_height = 50
-        self.selected_tile_id = None
-        self.map_entities = []  # List of entities (monsters) on the map: [(x, y, object_id), ...]
-        self.map_rooms = []  # List of rooms: [(x, y, width, height), ...]
-        self.map_zoom_level = 1.0  # Zoom level for map (1.0 = 100%)
-        self.map_stairs_position = None  # Position of stairs (goal)
-        
-        # Configure grid weights for map tab
-        self.map_tab.columnconfigure(2, weight=1)
-        self.map_tab.rowconfigure(0, weight=1)
-    
     def log_status(self, message, level="info"):
         """Log a status message to the status label"""
         colors = {
@@ -531,7 +437,7 @@ class GameObjectEditor:
         """Load game config from TOML file"""
         if not self.config_path.exists():
             self.log_status(f"Config file not found. Creating default config.", "warning")
-            self.config = {"game_objects": []}
+            self.config = {"game_objects": [], "levels": []}
             self.save_config()
             return
         
@@ -551,10 +457,18 @@ class GameObjectEditor:
                     self.create_default_objects()
                     self.save_config()
             
+            # Ensure levels array exists
+            if "levels" not in self.config:
+                self.config["levels"] = []
+            
             self.refresh_object_list()
             # Refresh tile palette if UI is already created
             if hasattr(self, 'tile_palette_listbox'):
                 self.refresh_tile_palette()
+            # Refresh level list if UI is already created
+            if hasattr(self, 'level_listbox'):
+                self.refresh_level_list()
+                self.refresh_monster_list()
             self.log_status(f"Loaded {len(self.config.get('game_objects', []))} game objects", "success")
         except Exception as e:
             self.log_status(f"Failed to load config: {e}", "error")
@@ -992,32 +906,7 @@ class GameObjectEditor:
             self.zoom_out()
     
     # Map zoom methods
-    def map_zoom_in(self):
-        """Zoom in on map"""
-        self.map_zoom_level = min(self.map_zoom_level * 1.5, 8.0)  # Max 8x zoom
-        self.update_map_zoom_display()
-        self.render_map()
-    
-    def map_zoom_out(self):
-        """Zoom out on map"""
-        self.map_zoom_level = max(self.map_zoom_level / 1.5, 0.25)  # Min 0.25x zoom
-        self.update_map_zoom_display()
-        self.render_map()
-    
-    def map_zoom_reset(self):
-        """Reset map zoom to 100%"""
-        self.map_zoom_level = 1.0
-        self.update_map_zoom_display()
-        self.render_map()
-    
-    def on_map_mousewheel(self, event):
-        """Handle mouse wheel for map zoom"""
-        if event.delta > 0:
-            self.map_zoom_in()
-        else:
-            self.map_zoom_out()
-    
-    def update_map_zoom_display(self):
+    def _find_tile_id_by_properties(self, tile_data):
         """Update the map zoom label"""
         if hasattr(self, 'map_zoom_label'):
             self.map_zoom_label.config(text=f"Zoom: {int(self.map_zoom_level * 100)}%")
@@ -1273,9 +1162,6 @@ class GameObjectEditor:
                 self.config["game_objects"].remove(self.current_object)
                 self.current_object = None
                 self.refresh_object_list()
-                # Refresh tile palette if it exists
-                if hasattr(self, 'tile_palette_listbox'):
-                    self.refresh_tile_palette()
                 # Clear form
                 for var, _ in self.prop_vars.values():
                     if isinstance(var, tk.BooleanVar):
@@ -1840,92 +1726,6 @@ class GameObjectEditor:
             self.log_status(f"Failed to restart server: {e}", "error")
             self.check_server_status()
     
-    # Map Editor Methods
-    def refresh_tile_palette(self):
-        """Populate the tile palette with tiles from the config"""
-        if not hasattr(self, 'tile_palette_listbox'):
-            return
-        if not self.config or "game_objects" not in self.config:
-            return
-        
-        self.tile_palette_listbox.delete(0, tk.END)
-        tiles = [obj for obj in self.config.get("game_objects", []) 
-                 if obj.get("object_type") == "tile"]
-        
-        for tile in tiles:
-            display_name = f"{tile.get('name', tile.get('id', 'Unknown'))} ({tile.get('id', 'unknown')})"
-            self.tile_palette_listbox.insert(tk.END, display_name)
-    
-    def on_tile_palette_select(self, event=None):
-        """Handle tile selection from palette"""
-        selection = self.tile_palette_listbox.curselection()
-        if selection:
-            index = selection[0]
-            tiles = [obj for obj in self.config.get("game_objects", []) 
-                     if obj.get("object_type") == "tile"]
-            if index < len(tiles):
-                self.selected_tile_id = tiles[index].get("id")
-                self.log_status(f"Selected tile: {tiles[index].get('name', self.selected_tile_id)}", "info")
-    
-    def generate_procedural_map(self):
-        """Generate a procedural map using the Rust server's dungeon generator"""
-        try:
-            self.log_status("Generating map from Rust server...", "info")
-            
-            # Make HTTP request to the server's map generation endpoint
-            import urllib.request
-            import json
-            
-            url = "http://localhost:3000/api/map"
-            try:
-                with urllib.request.urlopen(url, timeout=5) as response:
-                    data = json.loads(response.read().decode())
-            except urllib.error.URLError as e:
-                self.log_status(f"Failed to connect to server: {e}. Make sure the server is running.", "error")
-                return
-            
-            # Parse the response
-            self.map_width = data.get("width", 80)
-            self.map_height = data.get("height", 50)
-            self.map_width_var.set(str(self.map_width))
-            self.map_height_var.set(str(self.map_height))
-            
-            # Convert map tiles to tile IDs
-            map_tiles = data.get("map", [])
-            self.map_data = []
-            for row in map_tiles:
-                tile_row = []
-                for tile in row:
-                    # Find the tile ID that matches this tile's properties
-                    # We need to match by walkable and sprite coordinates
-                    tile_id = self._find_tile_id_by_properties(tile)
-                    tile_row.append(tile_id)
-                self.map_data.append(tile_row)
-            
-            # Parse entities (monsters + player)
-            entities_data = data.get("entities", [])
-            self.map_entities = []
-            for entity in entities_data:
-                self.map_entities.append({
-                    "x": entity.get("x", 0),
-                    "y": entity.get("y", 0),
-                    "object_id": entity.get("object_id", ""),
-                    "sprite_x": entity.get("sprite_x", 0),
-                    "sprite_y": entity.get("sprite_y", 0),
-                    "sprite_sheet": entity.get("sprite_sheet"),
-                    "controller": entity.get("controller", "AI"),  # "Player" or "AI"
-                })
-            
-            # Store stairs position
-            self.map_stairs_position = data.get("stairs_position")
-            
-            self.render_map()
-            num_monsters = sum(1 for e in self.map_entities if e.get("controller") == "AI")
-            num_players = sum(1 for e in self.map_entities if e.get("controller") == "Player")
-            self.log_status(f"Generated map: {self.map_width}x{self.map_height} with {num_monsters} monsters and {num_players} player(s)", "success")
-        except Exception as e:
-            self.log_status(f"Failed to generate map: {e}", "error")
-    
     def _find_tile_id_by_properties(self, tile_data):
         """Find a tile ID that matches the given tile properties"""
         # Try to match by sprite coordinates first
@@ -1958,26 +1758,452 @@ class GameObjectEditor:
         # Ultimate fallback
         return "wall_dirt_top"
     
-    def render_map(self):
-        """Render the map on the canvas"""
-        if not self.map_data:
+    def create_level_tab_ui(self):
+        """Create the UI for the Level Editor tab"""
+        # Left panel - Level list
+        left_panel = ttk.LabelFrame(self.level_tab, text="Levels", padding="10")
+        left_panel.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S), padx=(0, 10))
+        
+        ttk.Label(left_panel, text="Levels", font=("Arial", 12, "bold")).pack(anchor=tk.W, pady=(0, 10))
+        
+        # Level listbox with scrollbar
+        list_frame = ttk.Frame(left_panel)
+        list_frame.pack(fill=tk.BOTH, expand=True)
+        
+        scrollbar = ttk.Scrollbar(list_frame)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        self.level_listbox = tk.Listbox(list_frame, yscrollcommand=scrollbar.set, width=25)
+        self.level_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        self.level_listbox.bind('<<ListboxSelect>>', self.on_level_select)
+        scrollbar.config(command=self.level_listbox.yview)
+        
+        # Level buttons
+        level_btn_frame = ttk.Frame(left_panel)
+        level_btn_frame.pack(fill=tk.X, pady=(10, 0))
+        ttk.Button(level_btn_frame, text="Add Level", command=self.add_level).pack(fill=tk.X, pady=2)
+        ttk.Button(level_btn_frame, text="Delete Level", command=self.delete_level).pack(fill=tk.X, pady=2)
+        
+        # Middle panel - Level properties
+        middle_panel = ttk.LabelFrame(self.level_tab, text="Level Properties", padding="10")
+        middle_panel.grid(row=0, column=1, sticky=(tk.W, tk.E, tk.N, tk.S), padx=(0, 10))
+        
+        # Level number
+        ttk.Label(middle_panel, text="Level Number:").grid(row=0, column=0, sticky=tk.W, pady=5)
+        self.level_number_var = tk.StringVar()
+        ttk.Entry(middle_panel, textvariable=self.level_number_var, width=20).grid(row=0, column=1, sticky=(tk.W, tk.E), pady=5)
+        
+        # Min/Max rooms
+        ttk.Label(middle_panel, text="Min Rooms:").grid(row=1, column=0, sticky=tk.W, pady=5)
+        self.min_rooms_var = tk.StringVar()
+        ttk.Entry(middle_panel, textvariable=self.min_rooms_var, width=20).grid(row=1, column=1, sticky=(tk.W, tk.E), pady=5)
+        
+        ttk.Label(middle_panel, text="Max Rooms:").grid(row=2, column=0, sticky=tk.W, pady=5)
+        self.max_rooms_var = tk.StringVar()
+        ttk.Entry(middle_panel, textvariable=self.max_rooms_var, width=20).grid(row=2, column=1, sticky=(tk.W, tk.E), pady=5)
+        
+        # Min/Max monsters per room
+        ttk.Label(middle_panel, text="Min Monsters/Room:").grid(row=3, column=0, sticky=tk.W, pady=5)
+        self.min_monsters_var = tk.StringVar()
+        ttk.Entry(middle_panel, textvariable=self.min_monsters_var, width=20).grid(row=3, column=1, sticky=(tk.W, tk.E), pady=5)
+        
+        ttk.Label(middle_panel, text="Max Monsters/Room:").grid(row=4, column=0, sticky=tk.W, pady=5)
+        self.max_monsters_var = tk.StringVar()
+        ttk.Entry(middle_panel, textvariable=self.max_monsters_var, width=20).grid(row=4, column=1, sticky=(tk.W, tk.E), pady=5)
+        
+        # Chest count
+        ttk.Label(middle_panel, text="Chest Count:").grid(row=5, column=0, sticky=tk.W, pady=5)
+        self.chest_count_var = tk.StringVar()
+        ttk.Entry(middle_panel, textvariable=self.chest_count_var, width=20).grid(row=5, column=1, sticky=(tk.W, tk.E), pady=5)
+        
+        # Allowed monsters
+        ttk.Label(middle_panel, text="Allowed Monsters:", font=("Arial", 10, "bold")).grid(
+            row=6, column=0, columnspan=2, sticky=tk.W, pady=(20, 5))
+        
+        # Monster selection listbox
+        monster_list_frame = ttk.Frame(middle_panel)
+        monster_list_frame.grid(row=7, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=5)
+        
+        monster_scrollbar = ttk.Scrollbar(monster_list_frame)
+        monster_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        self.allowed_monsters_listbox = tk.Listbox(monster_list_frame, yscrollcommand=monster_scrollbar.set, 
+                                                   height=8, selectmode=tk.MULTIPLE)
+        self.allowed_monsters_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        monster_scrollbar.config(command=self.allowed_monsters_listbox.yview)
+        
+        # Populate monster list with available monsters
+        self.refresh_monster_list()
+        
+        # Right panel - Map preview and generation
+        right_panel = ttk.LabelFrame(self.level_tab, text="Map Preview", padding="10")
+        right_panel.grid(row=0, column=2, sticky=(tk.W, tk.E, tk.N, tk.S))
+        
+        # Generate button
+        ttk.Button(right_panel, text="Generate Map with Level Settings", 
+                  command=self.generate_level_map, 
+                  style="Accent.TButton").pack(fill=tk.X, pady=5)
+        
+        # Fullscreen button
+        ttk.Button(right_panel, text="Fullscreen Preview (F)", 
+                  command=self.fullscreen_level_map).pack(fill=tk.X, pady=5)
+        
+        ttk.Separator(right_panel, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=10)
+        
+        # Canvas with scrollbars for map
+        canvas_frame = ttk.Frame(right_panel)
+        canvas_frame.pack(fill=tk.BOTH, expand=True)
+        
+        # Scrollbars
+        v_scrollbar = ttk.Scrollbar(canvas_frame, orient=tk.VERTICAL)
+        v_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        h_scrollbar = ttk.Scrollbar(canvas_frame, orient=tk.HORIZONTAL)
+        h_scrollbar.pack(side=tk.BOTTOM, fill=tk.X)
+        
+        # Use the same map_canvas from map tab, or create a new one for level editor
+        # For now, create a separate one for level editor
+        self.level_map_canvas = tk.Canvas(canvas_frame, width=600, height=600, bg="black",
+                                          yscrollcommand=v_scrollbar.set,
+                                          xscrollcommand=h_scrollbar.set)
+        self.level_map_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        
+        v_scrollbar.config(command=self.level_map_canvas.yview)
+        h_scrollbar.config(command=self.level_map_canvas.xview)
+        
+        # Map zoom controls
+        zoom_frame = ttk.Frame(right_panel)
+        zoom_frame.pack(fill=tk.X, pady=(10, 0))
+        
+        ttk.Button(zoom_frame, text="Zoom In (+)", command=self.level_map_zoom_in, width=12).pack(side=tk.LEFT, padx=2)
+        ttk.Button(zoom_frame, text="Zoom Out (-)", command=self.level_map_zoom_out, width=12).pack(side=tk.LEFT, padx=2)
+        ttk.Button(zoom_frame, text="Reset (1x)", command=self.level_map_zoom_reset, width=12).pack(side=tk.LEFT, padx=2)
+        self.level_map_zoom_label = ttk.Label(zoom_frame, text="Zoom: 100%")
+        self.level_map_zoom_label.pack(side=tk.LEFT, padx=(10, 0))
+        
+        # Map canvas mouse wheel support for zoom
+        self.level_map_canvas.bind("<MouseWheel>", self.on_level_map_mousewheel)  # Windows/Linux
+        self.level_map_canvas.bind("<Button-4>", lambda e: self.level_map_zoom_in())  # macOS scroll up
+        self.level_map_canvas.bind("<Button-5>", lambda e: self.level_map_zoom_out())  # macOS scroll down
+        # Make canvas focusable for mouse wheel
+        self.level_map_canvas.bind("<Enter>", lambda e: self.level_map_canvas.focus_set())
+        self.level_map_canvas.bind("<Leave>", lambda e: self.root.focus_set())
+        
+        # Level map data (separate from map tab)
+        self.level_map_data = None
+        self.level_map_width = 80
+        self.level_map_height = 50
+        self.level_map_entities = []
+        self.level_map_rooms = []
+        self.level_map_zoom_level = 1.0
+        self.level_map_stairs_position = None
+        
+        # Configure grid weights
+        self.level_tab.columnconfigure(2, weight=1)
+        self.level_tab.columnconfigure(1, weight=0)
+        self.level_tab.rowconfigure(0, weight=1)
+        middle_panel.columnconfigure(1, weight=1)
+    
+    def refresh_monster_list(self):
+        """Populate the monster listbox with available monster characters"""
+        if not hasattr(self, 'allowed_monsters_listbox'):
+            return
+        if not self.config or "game_objects" not in self.config:
             return
         
-        self.map_canvas.delete("all")
+        self.allowed_monsters_listbox.delete(0, tk.END)
         
-        # Clear previous sprite image references to prevent memory leaks
-        if hasattr(self, '_map_sprite_images'):
-            self._map_sprite_images.clear()
+        # Get all monster characters
+        monsters = []
+        for obj in self.config.get("game_objects", []):
+            if obj.get("object_type") == "character":
+                monster = obj.get("monster", False)
+                if isinstance(monster, bool) and monster:
+                    monsters.append(obj)
+                elif isinstance(monster, str) and monster.lower() == "true":
+                    monsters.append(obj)
+                elif "properties" in obj and obj["properties"].get("monster") == "true":
+                    monsters.append(obj)
+        
+        # Sort by name
+        monsters.sort(key=lambda x: x.get("name", x.get("id", "")))
+        
+        for monster in monsters:
+            name = monster.get("name", monster.get("id", "Unknown"))
+            self.allowed_monsters_listbox.insert(tk.END, name)
+    
+    def on_level_select(self, event):
+        """Handle level selection"""
+        selection = self.level_listbox.curselection()
+        if not selection:
+            return
+        
+        index = selection[0]
+        levels = self.config.get("levels", [])
+        if index >= len(levels):
+            return
+        
+        level = levels[index]
+        self.current_level = level
+        
+        # Load level data into form
+        self.level_number_var.set(str(level.get("level_number", 1)))
+        self.min_rooms_var.set(str(level.get("min_rooms", 8)))
+        self.max_rooms_var.set(str(level.get("max_rooms", 12)))
+        self.min_monsters_var.set(str(level.get("min_monsters_per_room", 1)))
+        self.max_monsters_var.set(str(level.get("max_monsters_per_room", 1)))
+        self.chest_count_var.set(str(level.get("chest_count", 5)))
+        
+        # Select allowed monsters
+        self.allowed_monsters_listbox.selection_clear(0, tk.END)
+        allowed = level.get("allowed_monsters", [])
+        
+        # Get monster names for matching
+        monsters = []
+        for obj in self.config.get("game_objects", []):
+            if obj.get("object_type") == "character":
+                monster = obj.get("monster", False)
+                if isinstance(monster, bool) and monster:
+                    monsters.append(obj)
+                elif isinstance(monster, str) and monster.lower() == "true":
+                    monsters.append(obj)
+                elif "properties" in obj and obj["properties"].get("monster") == "true":
+                    monsters.append(obj)
+        
+        monsters.sort(key=lambda x: x.get("name", x.get("id", "")))
+        
+        for i, monster in enumerate(monsters):
+            monster_id = monster.get("id", "")
+            if monster_id in allowed:
+                self.allowed_monsters_listbox.selection_set(i)
+    
+    def add_level(self):
+        """Add a new level"""
+        if "levels" not in self.config:
+            self.config["levels"] = []
+        
+        # Find next level number
+        existing_levels = self.config["levels"]
+        next_level = 1
+        if existing_levels:
+            max_level = max(level.get("level_number", 1) for level in existing_levels)
+            next_level = max_level + 1
+        
+        # Get all monster IDs as default
+        monster_ids = []
+        for obj in self.config.get("game_objects", []):
+            if obj.get("object_type") == "character":
+                monster = obj.get("monster", False)
+                if isinstance(monster, bool) and monster:
+                    monster_ids.append(obj.get("id", ""))
+                elif isinstance(monster, str) and monster.lower() == "true":
+                    monster_ids.append(obj.get("id", ""))
+                elif "properties" in obj and obj["properties"].get("monster") == "true":
+                    monster_ids.append(obj.get("id", ""))
+        
+        new_level = {
+            "level_number": next_level,
+            "min_rooms": 8,
+            "max_rooms": 12,
+            "min_monsters_per_room": 1,
+            "max_monsters_per_room": 1,
+            "chest_count": 5,
+            "allowed_monsters": monster_ids,
+        }
+        
+        self.config["levels"].append(new_level)
+        self.save_config()
+        self.refresh_level_list()
+        self.log_status(f"Added level {next_level}", "success")
+    
+    def delete_level(self):
+        """Delete selected level"""
+        selection = self.level_listbox.curselection()
+        if not selection:
+            self.log_status("No level selected", "error")
+            return
+        
+        index = selection[0]
+        levels = self.config.get("levels", [])
+        if index >= len(levels):
+            return
+        
+        level = levels[index]
+        level_num = level.get("level_number", index + 1)
+        
+        if messagebox.askyesno("Confirm Delete", f"Delete level {level_num}?"):
+            del levels[index]
+            self.save_config()
+            self.refresh_level_list()
+            self.log_status(f"Deleted level {level_num}", "success")
+    
+    def refresh_level_list(self):
+        """Refresh the level listbox"""
+        if not hasattr(self, 'level_listbox'):
+            return
+        
+        self.level_listbox.delete(0, tk.END)
+        
+        if not self.config or "levels" not in self.config:
+            return
+        
+        levels = self.config["levels"]
+        # Sort by level number
+        sorted_levels = sorted(levels, key=lambda x: x.get("level_number", 0))
+        
+        for level in sorted_levels:
+            level_num = level.get("level_number", 0)
+            self.level_listbox.insert(tk.END, f"Level {level_num}")
+        
+        # Auto-save level changes when fields change (set up once)
+        if not hasattr(self, '_level_traces_setup'):
+            for var in [self.level_number_var, self.min_rooms_var, self.max_rooms_var, 
+                       self.min_monsters_var, self.max_monsters_var, self.chest_count_var]:
+                var.trace_add("write", lambda *args: self._save_current_level_changes())
+            self._level_traces_setup = True
+    
+    def _save_current_level_changes(self):
+        """Save current level changes to config"""
+        if not hasattr(self, 'level_listbox') or not self.level_listbox:
+            return
+        
+        selection = self.level_listbox.curselection()
+        if not selection:
+            return
+        
+        index = selection[0]
+        levels = self.config.get("levels", [])
+        if index >= len(levels):
+            return
+        
+        level = levels[index]
+        
+        try:
+            level["level_number"] = int(self.level_number_var.get())
+            level["min_rooms"] = int(self.min_rooms_var.get())
+            level["max_rooms"] = int(self.max_rooms_var.get())
+            level["min_monsters_per_room"] = int(self.min_monsters_var.get())
+            level["max_monsters_per_room"] = int(self.max_monsters_var.get())
+            level["chest_count"] = int(self.chest_count_var.get())
+            
+            # Get selected monsters
+            selected_indices = self.allowed_monsters_listbox.curselection()
+            monsters = []
+            for obj in self.config.get("game_objects", []):
+                if obj.get("object_type") == "character":
+                    monster = obj.get("monster", False)
+                    if isinstance(monster, bool) and monster:
+                        monsters.append(obj)
+                    elif isinstance(monster, str) and monster.lower() == "true":
+                        monsters.append(obj)
+                    elif "properties" in obj and obj["properties"].get("monster") == "true":
+                        monsters.append(obj)
+            
+            monsters.sort(key=lambda x: x.get("name", x.get("id", "")))
+            allowed_ids = [monsters[i].get("id", "") for i in selected_indices]
+            level["allowed_monsters"] = allowed_ids
+            
+            self.save_config()
+        except (ValueError, IndexError):
+            pass  # Ignore invalid input while typing
+    
+    def generate_level_map(self):
+        """Generate a map using the currently selected level's configuration"""
+        selection = self.level_listbox.curselection()
+        if not selection:
+            self.log_status("Please select a level first", "error")
+            return
+        
+        index = selection[0]
+        levels = self.config.get("levels", [])
+        if index >= len(levels):
+            self.log_status("Invalid level selection", "error")
+            return
+        
+        level = levels[index]
+        
+        try:
+            self.log_status(f"Generating map for Level {level.get('level_number', 0)}...", "info")
+            
+            # Make HTTP request to the server's map generation endpoint
+            import urllib.request
+            import json
+            
+            # Get level number from selected level
+            level_num = level.get("level_number", 0)
+            url = f"http://localhost:3000/api/map?level={level_num}"
+            try:
+                with urllib.request.urlopen(url, timeout=5) as response:
+                    data = json.loads(response.read().decode())
+            except urllib.error.URLError as e:
+                self.log_status(f"Failed to connect to server: {e}. Make sure the server is running.", "error")
+                return
+            
+            # Parse the response
+            self.level_map_width = data.get("width", 80)
+            self.level_map_height = data.get("height", 50)
+            
+            # Convert map tiles to tile IDs
+            map_tiles = data.get("map", [])
+            self.level_map_data = []
+            for row in map_tiles:
+                tile_row = []
+                for tile in row:
+                    tile_id = self._find_tile_id_by_properties(tile)
+                    tile_row.append(tile_id)
+                self.level_map_data.append(tile_row)
+            
+            # Parse entities (monsters + player)
+            entities_data = data.get("entities", [])
+            self.level_map_entities = []
+            for entity in entities_data:
+                self.level_map_entities.append({
+                    "x": entity.get("x", 0),
+                    "y": entity.get("y", 0),
+                    "object_id": entity.get("object_id", ""),
+                    "sprite_x": entity.get("sprite_x", 0),
+                    "sprite_y": entity.get("sprite_y", 0),
+                    "sprite_sheet": entity.get("sprite_sheet"),
+                    "controller": entity.get("controller", "AI"),
+                })
+            
+            # Store stairs position
+            self.level_map_stairs_position = data.get("stairs_position")
+            
+            self.render_level_map()
+            
+            # Show level stats
+            num_monsters = sum(1 for e in self.level_map_entities if e.get("controller") == "AI")
+            num_players = sum(1 for e in self.level_map_entities if e.get("controller") == "Player")
+            level_num = level.get("level_number", 0)
+            self.log_status(
+                f"Level {level_num} map: {self.level_map_width}x{self.level_map_height}, "
+                f"{num_monsters} monsters, {level.get('chest_count', 0)} chests configured", 
+                "success"
+            )
+        except Exception as e:
+            self.log_status(f"Failed to generate level map: {e}", "error")
+    
+    def render_level_map(self):
+        """Render the level map on the canvas"""
+        if not self.level_map_data:
+            return
+        
+        self.level_map_canvas.delete("all")
+        
+        # Clear previous sprite image references
+        if hasattr(self, '_level_map_sprite_images'):
+            self._level_map_sprite_images.clear()
         else:
-            self._map_sprite_images = []
+            self._level_map_sprite_images = []
         
         # Load sprite sheets if needed
         sprite_sheets = {}
         
         # Render each tile
-        for y in range(self.map_height):
-            for x in range(self.map_width):
-                tile_id = self.map_data[y][x]
+        for y in range(self.level_map_height):
+            for x in range(self.level_map_width):
+                tile_id = self.level_map_data[y][x]
                 
                 # Find the tile object
                 tile_obj = None
@@ -1987,9 +2213,8 @@ class GameObjectEditor:
                         break
                 
                 if not tile_obj:
-                    # Draw a placeholder rectangle (scaled by zoom)
-                    scaled_size = int(self.tile_size * self.map_zoom_level)
-                    self.map_canvas.create_rectangle(
+                    scaled_size = int(self.tile_size * self.level_map_zoom_level)
+                    self.level_map_canvas.create_rectangle(
                         x * scaled_size, y * scaled_size,
                         (x + 1) * scaled_size, (y + 1) * scaled_size,
                         fill="gray", outline="black"
@@ -1999,17 +2224,13 @@ class GameObjectEditor:
                 # Get sprite coordinates
                 sprites = tile_obj.get("sprites", [])
                 if not sprites:
-                    # Fallback to legacy sprite_x/sprite_y
                     sprite_x = tile_obj.get("sprite_x", 0)
                     sprite_y = tile_obj.get("sprite_y", 0)
                     sprites = [{"x": sprite_x, "y": sprite_y}]
                 
-                # Use first sprite (or randomize later)
                 sprite = sprites[0] if sprites else {"x": 0, "y": 0}
                 sprite_x = sprite.get("x", 0)
                 sprite_y = sprite.get("y", 0)
-                
-                # Get sprite sheet
                 sprite_sheet = tile_obj.get("sprite_sheet", "tiles.png")
                 
                 # Load sprite sheet if not already loaded
@@ -2020,7 +2241,6 @@ class GameObjectEditor:
                             img = Image.open(sheet_path)
                             sprite_sheets[sprite_sheet] = img
                         except Exception as e:
-                            self.log_status(f"Failed to load sprite sheet {sprite_sheet}: {e}", "error")
                             sprite_sheets[sprite_sheet] = None
                     else:
                         sprite_sheets[sprite_sheet] = None
@@ -2028,7 +2248,6 @@ class GameObjectEditor:
                 # Draw the tile
                 if sprite_sheets.get(sprite_sheet):
                     img = sprite_sheets[sprite_sheet]
-                    # Extract sprite from sprite sheet
                     left = sprite_x * self.tile_size
                     top = sprite_y * self.tile_size
                     right = left + self.tile_size
@@ -2036,152 +2255,59 @@ class GameObjectEditor:
                     
                     try:
                         sprite_img = img.crop((left, top, right, bottom))
-                        scaled_size = int(self.tile_size * self.map_zoom_level)
+                        scaled_size = int(self.tile_size * self.level_map_zoom_level)
                         sprite_img = sprite_img.resize((scaled_size, scaled_size), Image.NEAREST)
                         sprite_photo = ImageTk.PhotoImage(sprite_img)
                         
-                        # Store reference to prevent garbage collection
-                        if not hasattr(self, '_map_sprite_images'):
-                            self._map_sprite_images = []
-                        self._map_sprite_images.append(sprite_photo)
+                        self._level_map_sprite_images.append(sprite_photo)
                         
-                        self.map_canvas.create_image(
-                            x * scaled_size, y * scaled_size,
+                        dest_x = x * scaled_size
+                        dest_y = y * scaled_size
+                        self.level_map_canvas.create_image(
+                            dest_x, dest_y,
                             anchor=tk.NW, image=sprite_photo
                         )
-                    except Exception as e:
-                        # Fallback: draw colored rectangle (scaled by zoom)
-                        color = "lightgray" if tile_obj.get("walkable", False) else "darkgray"
-                        scaled_size = int(self.tile_size * self.map_zoom_level)
-                        self.map_canvas.create_rectangle(
+                    except Exception:
+                        scaled_size = int(self.tile_size * self.level_map_zoom_level)
+                        self.level_map_canvas.create_rectangle(
                             x * scaled_size, y * scaled_size,
                             (x + 1) * scaled_size, (y + 1) * scaled_size,
-                            fill=color, outline="black"
+                            fill="gray", outline="black"
                         )
                 else:
-                    # Fallback: draw colored rectangle (scaled by zoom)
-                    color = "lightgray" if tile_obj.get("walkable", False) else "darkgray"
-                    scaled_size = int(self.tile_size * self.map_zoom_level)
-                    self.map_canvas.create_rectangle(
+                    scaled_size = int(self.tile_size * self.level_map_zoom_level)
+                    self.level_map_canvas.create_rectangle(
                         x * scaled_size, y * scaled_size,
                         (x + 1) * scaled_size, (y + 1) * scaled_size,
-                        fill=color, outline="black"
+                        fill="gray", outline="black"
                     )
         
-        # Render entities (monsters + player) on top of tiles
-        for entity in self.map_entities:
-            entity_x = entity.get("x", 0)
-            entity_y = entity.get("y", 0)
+        # Draw entities (monsters and players)
+        for entity in self.level_map_entities:
+            x = entity.get("x", 0)
+            y = entity.get("y", 0)
             object_id = entity.get("object_id", "")
-            sprite_x = entity.get("sprite_x", 0)
-            sprite_y = entity.get("sprite_y", 0)
-            sprite_sheet = entity.get("sprite_sheet")
-            controller = entity.get("controller", "AI")  # "Player" or "AI"
+            controller = entity.get("controller", "AI")
             
-            # Find the entity object
-            entity_obj = None
+            # Find the character object
+            char_obj = None
             for obj in self.config.get("game_objects", []):
-                if obj.get("id") == object_id:
-                    entity_obj = obj
+                if obj.get("id") == object_id and obj.get("object_type") == "character":
+                    char_obj = obj
                     break
             
-            if entity_obj:
-                # Use sprite from entity data or from object
-                if sprite_sheet:
-                    sheet_path = self.assets_dir / sprite_sheet
-                    if sheet_path.exists():
-                        try:
-                            img = Image.open(sheet_path)
-                            # Extract sprite from sprite sheet
-                            left = sprite_x * self.tile_size
-                            top = sprite_y * self.tile_size
-                            right = left + self.tile_size
-                            bottom = top + self.tile_size
-                            
-                            sprite_img = img.crop((left, top, right, bottom))
-                            scaled_size = int(self.tile_size * self.map_zoom_level)
-                            sprite_img = sprite_img.resize((scaled_size, scaled_size), Image.NEAREST)
-                            sprite_photo = ImageTk.PhotoImage(sprite_img)
-                            
-                            # Store reference
-                            self._map_sprite_images.append(sprite_photo)
-                            
-                            # Draw entity on top of tile (scaled by zoom)
-                            self.map_canvas.create_image(
-                                entity_x * scaled_size, entity_y * scaled_size,
-                                anchor=tk.NW, image=sprite_photo
-                            )
-                            # Add colored border to distinguish player (green) from monsters (red)
-                            if controller == "Player":
-                                self.map_canvas.create_rectangle(
-                                    entity_x * scaled_size, entity_y * scaled_size,
-                                    (entity_x + 1) * scaled_size, (entity_y + 1) * scaled_size,
-                                    outline="lime", width=max(2, int(3 * self.map_zoom_level))
-                                )
-                        except Exception as e:
-                            # Fallback: draw a colored circle for entity (scaled by zoom)
-                            scaled_size = int(self.tile_size * self.map_zoom_level)
-                            offset = max(1, int(4 * self.map_zoom_level))
-                            # Use green for player, red for monsters
-                            color = "green" if controller == "Player" else "red"
-                            outline_color = "darkgreen" if controller == "Player" else "darkred"
-                            self.map_canvas.create_oval(
-                                entity_x * scaled_size + offset, entity_y * scaled_size + offset,
-                                (entity_x + 1) * scaled_size - offset, (entity_y + 1) * scaled_size - offset,
-                                fill=color, outline=outline_color, width=max(1, int(2 * self.map_zoom_level))
-                            )
-                    else:
-                        # Fallback: draw a colored circle for entity (scaled by zoom)
-                        scaled_size = int(self.tile_size * self.map_zoom_level)
-                        offset = max(1, int(4 * self.map_zoom_level))
-                        # Use green for player, red for monsters
-                        color = "green" if controller == "Player" else "red"
-                        outline_color = "darkgreen" if controller == "Player" else "darkred"
-                        self.map_canvas.create_oval(
-                            entity_x * scaled_size + offset, entity_y * scaled_size + offset,
-                            (entity_x + 1) * scaled_size - offset, (entity_y + 1) * scaled_size - offset,
-                            fill=color, outline=outline_color, width=max(1, int(2 * self.map_zoom_level))
-                        )
-                else:
-                    # Fallback: draw a colored circle for entity (scaled by zoom)
-                    scaled_size = int(self.tile_size * self.map_zoom_level)
-                    offset = max(1, int(4 * self.map_zoom_level))
-                    # Use green for player, red for monsters
-                    color = "green" if controller == "Player" else "red"
-                    outline_color = "darkgreen" if controller == "Player" else "darkred"
-                    self.map_canvas.create_oval(
-                        entity_x * scaled_size + offset, entity_y * scaled_size + offset,
-                        (entity_x + 1) * scaled_size - offset, (entity_y + 1) * scaled_size - offset,
-                        fill=color, outline=outline_color, width=max(1, int(2 * self.map_zoom_level))
-                    )
-        
-        # Render stairs (goal object) on top of everything
-        if self.map_stairs_position and isinstance(self.map_stairs_position, list) and len(self.map_stairs_position) == 2:
-            stairs_x = self.map_stairs_position[0]
-            stairs_y = self.map_stairs_position[1]
-            scaled_size = int(self.tile_size * self.map_zoom_level)
-            dest_x = stairs_x * scaled_size
-            dest_y = stairs_y * scaled_size
-            
-            # Find stairs object to get sprite info
-            stairs_obj = None
-            for obj in self.config.get("game_objects", []):
-                if obj.get("id") == "stairs":
-                    stairs_obj = obj
-                    break
-            
-            if stairs_obj:
-                sprite_sheet = stairs_obj.get("sprite_sheet", "tiles.png")
-                sprites = stairs_obj.get("sprites", [])
-                if sprites:
-                    sprite = sprites[0]
-                    sprite_x = sprite.get("x", 7)
-                    sprite_y = sprite.get("y", 16)
-                else:
-                    sprite_x = 7
-                    sprite_y = 16
+            if char_obj:
+                sprites = char_obj.get("sprites", [])
+                if not sprites:
+                    sprite_x = char_obj.get("sprite_x", 0)
+                    sprite_y = char_obj.get("sprite_y", 0)
+                    sprites = [{"x": sprite_x, "y": sprite_y}]
                 
-                # Load and render stairs sprite
+                sprite = sprites[0] if sprites else {"x": 0, "y": 0}
+                sprite_x = sprite.get("x", 0)
+                sprite_y = sprite.get("y", 0)
+                sprite_sheet = char_obj.get("sprite_sheet", "tiles.png")
+                
                 sheet_path = self.assets_dir / sprite_sheet
                 if sheet_path.exists():
                     try:
@@ -2192,50 +2318,430 @@ class GameObjectEditor:
                         bottom = top + self.tile_size
                         
                         sprite_img = img.crop((left, top, right, bottom))
+                        scaled_size = int(self.tile_size * self.level_map_zoom_level)
                         sprite_img = sprite_img.resize((scaled_size, scaled_size), Image.NEAREST)
                         sprite_photo = ImageTk.PhotoImage(sprite_img)
                         
-                        # Store reference
-                        if not hasattr(self, '_map_sprite_images'):
-                            self._map_sprite_images = []
-                        self._map_sprite_images.append(sprite_photo)
+                        self._level_map_sprite_images.append(sprite_photo)
                         
-                        # Draw stairs
-                        self.map_canvas.create_image(
+                        dest_x = x * scaled_size
+                        dest_y = y * scaled_size
+                        self.level_map_canvas.create_image(
                             dest_x, dest_y,
                             anchor=tk.NW, image=sprite_photo
                         )
                         
-                        # Add bright cyan border to make stairs visible
-                        self.map_canvas.create_rectangle(
+                        # Add colored border: green for player, red for monsters
+                        border_color = "green" if controller == "Player" else "red"
+                        self.level_map_canvas.create_rectangle(
                             dest_x, dest_y,
                             dest_x + scaled_size, dest_y + scaled_size,
-                            outline="cyan", width=max(2, int(3 * self.map_zoom_level))
+                            outline=border_color, width=max(2, int(3 * self.level_map_zoom_level))
                         )
-                    except Exception as e:
-                        # Fallback: draw bright yellow rectangle with cyan border
-                        self.map_canvas.create_rectangle(
+                    except Exception:
+                        pass
+        
+        # Draw stairs
+        if self.level_map_stairs_position:
+            stairs_x, stairs_y = self.level_map_stairs_position
+            stairs_obj = None
+            for obj in self.config.get("game_objects", []):
+                if obj.get("object_type") == "goal":
+                    stairs_obj = obj
+                    break
+            
+            if stairs_obj:
+                sprites = stairs_obj.get("sprites", [])
+                if not sprites:
+                    sprite_x = stairs_obj.get("sprite_x", 0)
+                    sprite_y = stairs_obj.get("sprite_y", 0)
+                    sprites = [{"x": sprite_x, "y": sprite_y}]
+                
+                sprite = sprites[0] if sprites else {"x": 0, "y": 0}
+                sprite_x = sprite.get("x", 0)
+                sprite_y = sprite.get("y", 0)
+                sprite_sheet = stairs_obj.get("sprite_sheet", "tiles.png")
+                
+                sheet_path = self.assets_dir / sprite_sheet
+                if sheet_path.exists():
+                    try:
+                        img = Image.open(sheet_path)
+                        left = sprite_x * self.tile_size
+                        top = sprite_y * self.tile_size
+                        right = left + self.tile_size
+                        bottom = top + self.tile_size
+                        
+                        sprite_img = img.crop((left, top, right, bottom))
+                        scaled_size = int(self.tile_size * self.level_map_zoom_level)
+                        sprite_img = sprite_img.resize((scaled_size, scaled_size), Image.NEAREST)
+                        sprite_photo = ImageTk.PhotoImage(sprite_img)
+                        
+                        self._level_map_sprite_images.append(sprite_photo)
+                        
+                        dest_x = stairs_x * scaled_size
+                        dest_y = stairs_y * scaled_size
+                        self.level_map_canvas.create_image(
+                            dest_x, dest_y,
+                            anchor=tk.NW, image=sprite_photo
+                        )
+                        
+                        # Add bright cyan border
+                        self.level_map_canvas.create_rectangle(
                             dest_x, dest_y,
                             dest_x + scaled_size, dest_y + scaled_size,
-                            fill="yellow", outline="cyan", width=max(2, int(3 * self.map_zoom_level))
+                            outline="cyan", width=max(2, int(3 * self.level_map_zoom_level))
                         )
-                else:
-                    # Fallback: draw bright yellow rectangle with cyan border
-                    self.map_canvas.create_rectangle(
-                        dest_x, dest_y,
-                        dest_x + scaled_size, dest_y + scaled_size,
-                        fill="yellow", outline="cyan", width=max(2, int(3 * self.map_zoom_level))
-                    )
-            else:
-                # Fallback: draw bright yellow rectangle with cyan border
-                self.map_canvas.create_rectangle(
-                    dest_x, dest_y,
-                    dest_x + scaled_size, dest_y + scaled_size,
-                    fill="yellow", outline="cyan", width=max(2, int(3 * self.map_zoom_level))
-                )
+                    except Exception:
+                        pass
         
         # Update scroll region
-        self.map_canvas.config(scrollregion=self.map_canvas.bbox("all"))
+        self.level_map_canvas.config(scrollregion=self.level_map_canvas.bbox("all"))
+    
+    def level_map_zoom_in(self):
+        """Zoom in on level map"""
+        self.level_map_zoom_level = min(self.level_map_zoom_level * 1.2, 5.0)
+        self.level_map_zoom_label.config(text=f"Zoom: {int(self.level_map_zoom_level * 100)}%")
+        if self.level_map_data:
+            self.render_level_map()
+    
+    def level_map_zoom_out(self):
+        """Zoom out on level map"""
+        self.level_map_zoom_level = max(self.level_map_zoom_level / 1.2, 0.1)
+        self.level_map_zoom_label.config(text=f"Zoom: {int(self.level_map_zoom_level * 100)}%")
+        if self.level_map_data:
+            self.render_level_map()
+    
+    def level_map_zoom_reset(self):
+        """Reset level map zoom"""
+        self.level_map_zoom_level = 1.0
+        self.level_map_zoom_label.config(text="Zoom: 100%")
+        if self.level_map_data:
+            self.render_level_map()
+    
+    def on_level_map_mousewheel(self, event):
+        """Handle mouse wheel for level map zoom"""
+        if event.delta > 0:
+            self.level_map_zoom_in()
+        else:
+            self.level_map_zoom_out()
+    
+    def fullscreen_level_map(self):
+        """Open map preview in fullscreen window"""
+        if not self.level_map_data:
+            self.log_status("Generate a map first", "error")
+            return
+        
+        # Close existing fullscreen window if open
+        if self.level_map_fullscreen_window is not None:
+            self.level_map_fullscreen_window.destroy()
+            self.level_map_fullscreen_window = None
+            self.level_map_fullscreen_canvas = None
+            return
+        
+        # Create fullscreen window
+        self.level_map_fullscreen_window = tk.Toplevel(self.root)
+        self.level_map_fullscreen_window.title("Map Preview - Fullscreen")
+        self.level_map_fullscreen_window.attributes("-fullscreen", True)
+        self.level_map_fullscreen_window.configure(bg="black")
+        
+        # Bind Escape to exit fullscreen
+        self.level_map_fullscreen_window.bind("<Escape>", lambda e: self.fullscreen_level_map())
+        self.level_map_fullscreen_window.bind("<KeyPress-f>", lambda e: self.fullscreen_level_map())
+        self.level_map_fullscreen_window.bind("<KeyPress-F>", lambda e: self.fullscreen_level_map())
+        
+        # Create canvas that fills the window
+        self.level_map_fullscreen_canvas = tk.Canvas(
+            self.level_map_fullscreen_window, 
+            bg="black",
+            highlightthickness=0
+        )
+        self.level_map_fullscreen_canvas.pack(fill=tk.BOTH, expand=True)
+        
+        # Add zoom controls at the top
+        zoom_frame = tk.Frame(self.level_map_fullscreen_window, bg="black")
+        zoom_frame.pack(fill=tk.X, pady=10)
+        
+        tk.Button(zoom_frame, text="Zoom In (+)", command=self.level_map_fullscreen_zoom_in, 
+                 bg="gray", fg="white", padx=10, pady=5).pack(side=tk.LEFT, padx=5)
+        tk.Button(zoom_frame, text="Zoom Out (-)", command=self.level_map_fullscreen_zoom_out,
+                 bg="gray", fg="white", padx=10, pady=5).pack(side=tk.LEFT, padx=5)
+        tk.Button(zoom_frame, text="Reset (1x)", command=self.level_map_fullscreen_zoom_reset,
+                 bg="gray", fg="white", padx=10, pady=5).pack(side=tk.LEFT, padx=5)
+        tk.Button(zoom_frame, text="Exit Fullscreen (Esc/F)", command=self.fullscreen_level_map,
+                 bg="red", fg="white", padx=10, pady=5).pack(side=tk.RIGHT, padx=5)
+        
+        self.level_map_fullscreen_zoom_label = tk.Label(zoom_frame, text="Zoom: 100%", 
+                                                        bg="black", fg="white", font=("Arial", 12))
+        self.level_map_fullscreen_zoom_label.pack(side=tk.LEFT, padx=20)
+        
+        # Mouse wheel support
+        self.level_map_fullscreen_canvas.bind("<MouseWheel>", self.on_level_map_fullscreen_mousewheel)
+        self.level_map_fullscreen_canvas.bind("<Button-4>", lambda e: self.level_map_fullscreen_zoom_in())
+        self.level_map_fullscreen_canvas.bind("<Button-5>", lambda e: self.level_map_fullscreen_zoom_out())
+        self.level_map_fullscreen_canvas.bind("<Enter>", lambda e: self.level_map_fullscreen_canvas.focus_set())
+        
+        # Use current zoom level for fullscreen (or keep existing if already set)
+        if self.level_map_fullscreen_zoom_level == 1.0:
+            self.level_map_fullscreen_zoom_level = self.level_map_zoom_level
+        
+        # Render the map in fullscreen
+        self.render_level_map_fullscreen()
+        
+        # Focus the fullscreen window
+        self.level_map_fullscreen_window.focus_set()
+    
+    def render_level_map_fullscreen(self):
+        """Render the level map on the fullscreen canvas"""
+        if not self.level_map_data or not self.level_map_fullscreen_canvas:
+            return
+        
+        self.level_map_fullscreen_canvas.delete("all")
+        
+        # Clear previous sprite image references
+        if hasattr(self, '_level_map_fullscreen_sprite_images'):
+            self._level_map_fullscreen_sprite_images.clear()
+        else:
+            self._level_map_fullscreen_sprite_images = []
+        
+        # Get window size
+        window_width = self.level_map_fullscreen_window.winfo_width()
+        window_height = self.level_map_fullscreen_window.winfo_height()
+        
+        # Calculate optimal zoom to fit map on screen
+        if window_width > 1 and window_height > 1:
+            tile_size_scaled = int(self.tile_size * self.level_map_fullscreen_zoom_level)
+            map_pixel_width = self.level_map_width * tile_size_scaled
+            map_pixel_height = self.level_map_height * tile_size_scaled
+            
+            # Center the map
+            offset_x = max(0, (window_width - map_pixel_width) // 2)
+            offset_y = max(0, (window_height - map_pixel_height) // 2)
+        else:
+            offset_x = 0
+            offset_y = 0
+            tile_size_scaled = int(self.tile_size * self.level_map_fullscreen_zoom_level)
+        
+        # Load sprite sheets
+        sprite_sheets = {}
+        
+        # Render each tile
+        for y in range(self.level_map_height):
+            for x in range(self.level_map_width):
+                tile_id = self.level_map_data[y][x]
+                
+                # Find the tile object
+                tile_obj = None
+                for obj in self.config.get("game_objects", []):
+                    if obj.get("id") == tile_id and obj.get("object_type") == "tile":
+                        tile_obj = obj
+                        break
+                
+                if not tile_obj:
+                    dest_x = offset_x + x * tile_size_scaled
+                    dest_y = offset_y + y * tile_size_scaled
+                    self.level_map_fullscreen_canvas.create_rectangle(
+                        dest_x, dest_y,
+                        dest_x + tile_size_scaled, dest_y + tile_size_scaled,
+                        fill="gray", outline="black"
+                    )
+                    continue
+                
+                # Get sprite coordinates
+                sprites = tile_obj.get("sprites", [])
+                if not sprites:
+                    sprite_x = tile_obj.get("sprite_x", 0)
+                    sprite_y = tile_obj.get("sprite_y", 0)
+                    sprites = [{"x": sprite_x, "y": sprite_y}]
+                
+                sprite = sprites[0] if sprites else {"x": 0, "y": 0}
+                sprite_x = sprite.get("x", 0)
+                sprite_y = sprite.get("y", 0)
+                sprite_sheet = tile_obj.get("sprite_sheet", "tiles.png")
+                
+                # Load sprite sheet if not already loaded
+                if sprite_sheet not in sprite_sheets:
+                    sheet_path = self.assets_dir / sprite_sheet
+                    if sheet_path.exists():
+                        try:
+                            img = Image.open(sheet_path)
+                            sprite_sheets[sprite_sheet] = img
+                        except Exception:
+                            sprite_sheets[sprite_sheet] = None
+                    else:
+                        sprite_sheets[sprite_sheet] = None
+                
+                # Draw the tile
+                if sprite_sheets.get(sprite_sheet):
+                    img = sprite_sheets[sprite_sheet]
+                    left = sprite_x * self.tile_size
+                    top = sprite_y * self.tile_size
+                    right = left + self.tile_size
+                    bottom = top + self.tile_size
+                    
+                    try:
+                        sprite_img = img.crop((left, top, right, bottom))
+                        sprite_img = sprite_img.resize((tile_size_scaled, tile_size_scaled), Image.NEAREST)
+                        sprite_photo = ImageTk.PhotoImage(sprite_img)
+                        
+                        self._level_map_fullscreen_sprite_images.append(sprite_photo)
+                        
+                        dest_x = offset_x + x * tile_size_scaled
+                        dest_y = offset_y + y * tile_size_scaled
+                        self.level_map_fullscreen_canvas.create_image(
+                            dest_x, dest_y,
+                            anchor=tk.NW, image=sprite_photo
+                        )
+                    except Exception:
+                        dest_x = offset_x + x * tile_size_scaled
+                        dest_y = offset_y + y * tile_size_scaled
+                        self.level_map_fullscreen_canvas.create_rectangle(
+                            dest_x, dest_y,
+                            dest_x + tile_size_scaled, dest_y + tile_size_scaled,
+                            fill="gray", outline="black"
+                        )
+                else:
+                    dest_x = offset_x + x * tile_size_scaled
+                    dest_y = offset_y + y * tile_size_scaled
+                    self.level_map_fullscreen_canvas.create_rectangle(
+                        dest_x, dest_y,
+                        dest_x + tile_size_scaled, dest_y + tile_size_scaled,
+                        fill="gray", outline="black"
+                    )
+        
+        # Draw entities
+        for entity in self.level_map_entities:
+            x = entity.get("x", 0)
+            y = entity.get("y", 0)
+            object_id = entity.get("object_id", "")
+            controller = entity.get("controller", "AI")
+            
+            char_obj = None
+            for obj in self.config.get("game_objects", []):
+                if obj.get("id") == object_id and obj.get("object_type") == "character":
+                    char_obj = obj
+                    break
+            
+            if char_obj:
+                sprites = char_obj.get("sprites", [])
+                if not sprites:
+                    sprite_x = char_obj.get("sprite_x", 0)
+                    sprite_y = char_obj.get("sprite_y", 0)
+                    sprites = [{"x": sprite_x, "y": sprite_y}]
+                
+                sprite = sprites[0] if sprites else {"x": 0, "y": 0}
+                sprite_x = sprite.get("x", 0)
+                sprite_y = sprite.get("y", 0)
+                sprite_sheet = char_obj.get("sprite_sheet", "tiles.png")
+                
+                sheet_path = self.assets_dir / sprite_sheet
+                if sheet_path.exists():
+                    try:
+                        img = Image.open(sheet_path)
+                        left = sprite_x * self.tile_size
+                        top = sprite_y * self.tile_size
+                        right = left + self.tile_size
+                        bottom = top + self.tile_size
+                        
+                        sprite_img = img.crop((left, top, right, bottom))
+                        sprite_img = sprite_img.resize((tile_size_scaled, tile_size_scaled), Image.NEAREST)
+                        sprite_photo = ImageTk.PhotoImage(sprite_img)
+                        
+                        self._level_map_fullscreen_sprite_images.append(sprite_photo)
+                        
+                        dest_x = offset_x + x * tile_size_scaled
+                        dest_y = offset_y + y * tile_size_scaled
+                        self.level_map_fullscreen_canvas.create_image(
+                            dest_x, dest_y,
+                            anchor=tk.NW, image=sprite_photo
+                        )
+                        
+                        border_color = "green" if controller == "Player" else "red"
+                        self.level_map_fullscreen_canvas.create_rectangle(
+                            dest_x, dest_y,
+                            dest_x + tile_size_scaled, dest_y + tile_size_scaled,
+                            outline=border_color, width=max(2, int(3 * self.level_map_fullscreen_zoom_level))
+                        )
+                    except Exception:
+                        pass
+        
+        # Draw stairs
+        if self.level_map_stairs_position:
+            stairs_x, stairs_y = self.level_map_stairs_position
+            stairs_obj = None
+            for obj in self.config.get("game_objects", []):
+                if obj.get("object_type") == "goal":
+                    stairs_obj = obj
+                    break
+            
+            if stairs_obj:
+                sprites = stairs_obj.get("sprites", [])
+                if not sprites:
+                    sprite_x = stairs_obj.get("sprite_x", 0)
+                    sprite_y = stairs_obj.get("sprite_y", 0)
+                    sprites = [{"x": sprite_x, "y": sprite_y}]
+                
+                sprite = sprites[0] if sprites else {"x": 0, "y": 0}
+                sprite_x = sprite.get("x", 0)
+                sprite_y = sprite.get("y", 0)
+                sprite_sheet = stairs_obj.get("sprite_sheet", "tiles.png")
+                
+                sheet_path = self.assets_dir / sprite_sheet
+                if sheet_path.exists():
+                    try:
+                        img = Image.open(sheet_path)
+                        left = sprite_x * self.tile_size
+                        top = sprite_y * self.tile_size
+                        right = left + self.tile_size
+                        bottom = top + self.tile_size
+                        
+                        sprite_img = img.crop((left, top, right, bottom))
+                        sprite_img = sprite_img.resize((tile_size_scaled, tile_size_scaled), Image.NEAREST)
+                        sprite_photo = ImageTk.PhotoImage(sprite_img)
+                        
+                        self._level_map_fullscreen_sprite_images.append(sprite_photo)
+                        
+                        dest_x = offset_x + stairs_x * tile_size_scaled
+                        dest_y = offset_y + stairs_y * tile_size_scaled
+                        self.level_map_fullscreen_canvas.create_image(
+                            dest_x, dest_y,
+                            anchor=tk.NW, image=sprite_photo
+                        )
+                        
+                        self.level_map_fullscreen_canvas.create_rectangle(
+                            dest_x, dest_y,
+                            dest_x + tile_size_scaled, dest_y + tile_size_scaled,
+                            outline="cyan", width=max(2, int(3 * self.level_map_fullscreen_zoom_level))
+                        )
+                    except Exception:
+                        pass
+    
+    def level_map_fullscreen_zoom_in(self):
+        """Zoom in on fullscreen map"""
+        self.level_map_fullscreen_zoom_level = min(self.level_map_fullscreen_zoom_level * 1.2, 5.0)
+        self.level_map_fullscreen_zoom_label.config(text=f"Zoom: {int(self.level_map_fullscreen_zoom_level * 100)}%")
+        if self.level_map_data:
+            self.render_level_map_fullscreen()
+    
+    def level_map_fullscreen_zoom_out(self):
+        """Zoom out on fullscreen map"""
+        self.level_map_fullscreen_zoom_level = max(self.level_map_fullscreen_zoom_level / 1.2, 0.1)
+        self.level_map_fullscreen_zoom_label.config(text=f"Zoom: {int(self.level_map_fullscreen_zoom_level * 100)}%")
+        if self.level_map_data:
+            self.render_level_map_fullscreen()
+    
+    def level_map_fullscreen_zoom_reset(self):
+        """Reset fullscreen map zoom"""
+        self.level_map_fullscreen_zoom_level = 1.0
+        self.level_map_fullscreen_zoom_label.config(text="Zoom: 100%")
+        if self.level_map_data:
+            self.render_level_map_fullscreen()
+    
+    def on_level_map_fullscreen_mousewheel(self, event):
+        """Handle mouse wheel for fullscreen map zoom"""
+        if event.delta > 0:
+            self.level_map_fullscreen_zoom_in()
+        else:
+            self.level_map_fullscreen_zoom_out()
 
 def main():
     root = tk.Tk()

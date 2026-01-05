@@ -270,7 +270,9 @@ pub async fn schema_endpoint() -> Json<schema::GameObjectSchema> {
     Json(schema::GameObjectSchema::generate())
 }
 
-pub async fn generate_map_endpoint() -> Json<GameUpdate> {
+pub async fn generate_map_endpoint(
+    axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
+) -> Json<GameUpdate> {
     // Load config and generate a fresh map
     let config = match crate::config::GameConfig::load("game_config.toml") {
         Ok(cfg) => cfg,
@@ -284,7 +286,23 @@ pub async fn generate_map_endpoint() -> Json<GameUpdate> {
 
     let tile_registry = crate::tile_registry::TileRegistry::load_from_config(&config);
     let object_registry = crate::game_object::GameObjectRegistry::load_from_config(&config);
-    let mut game_state = GameState::new_with_registry(tile_registry, object_registry);
+    
+    // Get level config if level parameter is provided
+    let level_config = if let Some(level_str) = params.get("level") {
+        if let Ok(level_num) = level_str.parse::<u32>() {
+            config.levels.iter().find(|l| l.level_number == level_num)
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+    
+    let mut game_state = if let Some(level) = level_config {
+        GameState::new_with_level(tile_registry, object_registry, Some(level))
+    } else {
+        GameState::new_with_registry(tile_registry, object_registry)
+    };
     
     // Add a preview player for the map editor
     let preview_player_id = "preview_player".to_string();
@@ -319,7 +337,16 @@ async fn handle_socket(socket: WebSocket, state: SharedState, tx: Tx) {
     // Add new player entity to game state
     {
         let mut game = state.lock().unwrap();
+        eprintln!("[WS] Adding new player: {}", player_id);
+        let player_count_before = game.entities.iter()
+            .filter(|e| e.controller == crate::entity::EntityController::Player)
+            .count();
+        eprintln!("[WS] Players before add: {}", player_count_before);
         game.add_player(player_id.clone());
+        let player_count_after = game.entities.iter()
+            .filter(|e| e.controller == crate::entity::EntityController::Player)
+            .count();
+        eprintln!("[WS] Players after add: {}", player_count_after);
     }
 
     // Send initial game state
@@ -342,7 +369,12 @@ async fn handle_socket(socket: WebSocket, state: SharedState, tx: Tx) {
         }
         // Clean up player when send task ends (connection closed)
         let mut game = state_for_send_cleanup.lock().unwrap();
+        eprintln!("[WS] Removing player {} (send task ended)", player_id_for_send_cleanup);
         game.remove_player(&player_id_for_send_cleanup);
+        let player_count = game.entities.iter()
+            .filter(|e| e.controller == crate::entity::EntityController::Player)
+            .count();
+        eprintln!("[WS] Players remaining: {}", player_count);
     });
 
     // Spawn task to receive messages from client
@@ -374,10 +406,15 @@ async fn handle_socket(socket: WebSocket, state: SharedState, tx: Tx) {
             recv_task.abort();
             // Also cleanup here in case recv_task cleanup didn't run
             let mut game = state_for_final_cleanup.lock().unwrap();
+            eprintln!("[WS] Removing player {} (send_task ended, final cleanup)", player_id_for_final_cleanup);
             game.remove_player(&player_id_for_final_cleanup);
         },
         _ = (&mut recv_task) => {
             send_task.abort();
+            // Cleanup when recv_task ends
+            let mut game = state_for_final_cleanup.lock().unwrap();
+            eprintln!("[WS] Removing player {} (recv_task ended, final cleanup)", player_id_for_final_cleanup);
+            game.remove_player(&player_id_for_final_cleanup);
             // Also cleanup here in case send_task cleanup didn't run
             let mut game = state_for_final_cleanup.lock().unwrap();
             game.remove_player(&player_id_for_final_cleanup);
@@ -511,6 +548,9 @@ pub fn create_default_config() -> crate::config::GameConfig {
     health_potion.healing_power = Some(20);
     objects.push(health_potion);
     
-    crate::config::GameConfig { game_objects: objects }
+    crate::config::GameConfig { 
+        game_objects: objects,
+        levels: Vec::new(),
+    }
 }
 

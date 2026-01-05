@@ -142,3 +142,12 @@ x = 1
 y = 17
 
 
+[[levels]]
+level_number = 1
+min_rooms = 5
+max_rooms = 7
+min_monsters_per_room = 0
+max_monsters_per_room = 2
+chest_count = 2
+allowed_monsters = []
+

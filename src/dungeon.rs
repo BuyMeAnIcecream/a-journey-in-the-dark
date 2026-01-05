@@ -20,6 +20,10 @@ pub struct Dungeon {
 
 impl Dungeon {
     pub fn new_with_registry(width: usize, height: usize, registry: &TileRegistry) -> Self {
+        Self::new_with_room_count(width, height, registry, 8, 12)
+    }
+    
+    pub fn new_with_room_count(width: usize, height: usize, registry: &TileRegistry, min_rooms: u32, max_rooms: u32) -> Self {
         // Get all wall tiles from registry, default to wall_dirt_top if none found
         let wall_tiles = registry.get_wall_tiles();
         let default_wall = if wall_tiles.is_empty() {
@@ -30,14 +34,14 @@ impl Dungeon {
         };
         
         let mut tiles = vec![vec![default_wall; width]; height];
-        let rooms = Self::generate_rooms(&mut tiles, width, height, registry);
+        let rooms = Self::generate_rooms(&mut tiles, width, height, registry, min_rooms, max_rooms);
         Self { width, height, tiles, rooms }
     }
 
-    fn generate_rooms(tiles: &mut Vec<Vec<Tile>>, width: usize, height: usize, registry: &TileRegistry) -> Vec<Room> {
+    fn generate_rooms(tiles: &mut Vec<Vec<Tile>>, width: usize, height: usize, registry: &TileRegistry, min_rooms: u32, max_rooms: u32) -> Vec<Room> {
         let mut rng = rand::thread_rng();
-        // Generate more rooms since they'll be closer together
-        let num_rooms = rng.gen_range(8..=12);
+        // Generate rooms based on level config
+        let num_rooms = rng.gen_range(min_rooms..=max_rooms) as usize;
         let mut rooms: Vec<Room> = Vec::new();
         const MAX_ATTEMPTS: usize = 200; // Limit attempts to avoid infinite loops
 

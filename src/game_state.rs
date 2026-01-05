@@ -32,8 +32,12 @@ pub struct GameState {
 
 impl GameState {
     pub fn new_with_registry(tile_registry: TileRegistry, object_registry: GameObjectRegistry) -> Self {
+        Self::new_with_level(tile_registry, object_registry, None)
+    }
+    
+    pub fn new_with_level(tile_registry: TileRegistry, object_registry: GameObjectRegistry, level_config: Option<&crate::config::LevelConfig>) -> Self {
         let (dungeon, entities, consumables, chests, stairs_pos) = 
-            MapGenerator::generate_map(&tile_registry, &object_registry);
+            MapGenerator::generate_map(&tile_registry, &object_registry, level_config);
         
         Self {
             dungeon,
@@ -303,8 +307,9 @@ impl GameState {
         self.chests.clear();
         
         // Generate completely new map (dungeon, monsters, chests, consumables, stairs)
+        // TODO: Use current level config when level system is implemented
         let (dungeon, mut new_entities, new_consumables, new_chests, stairs_pos) = 
-            MapGenerator::generate_map(&self.tile_registry, &self.object_registry);
+            MapGenerator::generate_map(&self.tile_registry, &self.object_registry, None);
         
         self.dungeon = dungeon;
         self.consumables = new_consumables;
