@@ -1820,32 +1820,35 @@ class GameObjectEditor:
         ttk.Label(middle_panel, text="Allowed Monsters:", font=("Arial", 10, "bold")).grid(
             row=6, column=0, columnspan=2, sticky=tk.W, pady=(20, 5))
         
-        # Instructions
-        ttk.Label(middle_panel, text="(Select monsters to allow in this level)", 
-                 font=("Arial", 8), foreground="gray").grid(
-            row=6, column=1, sticky=tk.E, pady=(20, 5))
+        # Monster checkboxes frame with scrollbar
+        monster_checkbox_frame = ttk.Frame(middle_panel)
+        monster_checkbox_frame.grid(row=7, column=0, columnspan=2, sticky=(tk.W, tk.E, tk.N, tk.S), pady=5)
         
-        # Monster selection listbox
-        monster_list_frame = ttk.Frame(middle_panel)
-        monster_list_frame.grid(row=7, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=5)
+        # Create a canvas with scrollbar for monster checkboxes
+        monster_canvas = tk.Canvas(monster_checkbox_frame, height=150)
+        monster_scrollbar = ttk.Scrollbar(monster_checkbox_frame, orient="vertical", command=monster_canvas.yview)
+        self.monster_checkbox_container = ttk.Frame(monster_canvas)
         
-        monster_scrollbar = ttk.Scrollbar(monster_list_frame)
+        monster_canvas.create_window((0, 0), window=self.monster_checkbox_container, anchor="nw")
+        monster_canvas.configure(yscrollcommand=monster_scrollbar.set)
+        
+        monster_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         monster_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         
-        self.allowed_monsters_listbox = tk.Listbox(monster_list_frame, yscrollcommand=monster_scrollbar.set, 
-                                                   height=8, selectmode=tk.MULTIPLE)
-        self.allowed_monsters_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        monster_scrollbar.config(command=self.allowed_monsters_listbox.yview)
+        # Update scroll region when container size changes
+        def configure_scroll_region(event):
+            monster_canvas.configure(scrollregion=monster_canvas.bbox("all"))
+        self.monster_checkbox_container.bind("<Configure>", configure_scroll_region)
         
-        # Bind selection change to save
-        self.allowed_monsters_listbox.bind('<<ListboxSelect>>', self.on_monster_selection_change)
+        # Mouse wheel support
+        def on_mousewheel(event):
+            monster_canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+        monster_canvas.bind_all("<MouseWheel>", on_mousewheel)
         
-        # Add a button to clear selection
-        clear_monsters_btn = ttk.Button(middle_panel, text="Clear Selection", 
-                                       command=self.clear_monster_selection)
-        clear_monsters_btn.grid(row=8, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=5)
+        # Store monster checkboxes
+        self.monster_checkboxes = {}  # {monster_id: (checkbox_var, checkbox_widget)}
         
-        # Populate monster list with available monsters
+        # Populate monster checkboxes
         self.refresh_monster_list()
         
         # Right panel - Map preview and generation
@@ -1916,15 +1919,19 @@ class GameObjectEditor:
         self.level_tab.columnconfigure(1, weight=0)
         self.level_tab.rowconfigure(0, weight=1)
         middle_panel.columnconfigure(1, weight=1)
+        middle_panel.rowconfigure(7, weight=1)  # Allow monster checkbox area to expand
     
     def refresh_monster_list(self):
-        """Populate the monster listbox with available monster characters"""
-        if not hasattr(self, 'allowed_monsters_listbox'):
+        """Populate the monster checkboxes with available monster characters"""
+        if not hasattr(self, 'monster_checkbox_container'):
             return
         if not self.config or "game_objects" not in self.config:
             return
         
-        self.allowed_monsters_listbox.delete(0, tk.END)
+        # Clear existing checkboxes
+        for widget in self.monster_checkbox_container.winfo_children():
+            widget.destroy()
+        self.monster_checkboxes.clear()
         
         # Get all monster characters
         monsters = []
@@ -1941,17 +1948,25 @@ class GameObjectEditor:
         # Sort by name
         monsters.sort(key=lambda x: x.get("name", x.get("id", "")))
         
+        # Create checkboxes for each monster
         for monster in monsters:
+            monster_id = monster.get("id", "")
             name = monster.get("name", monster.get("id", "Unknown"))
-            self.allowed_monsters_listbox.insert(tk.END, name)
+            
+            var = tk.BooleanVar()
+            var.trace_add("write", lambda *args, mid=monster_id: self.on_monster_checkbox_change(mid))
+            
+            checkbox = ttk.Checkbutton(
+                self.monster_checkbox_container,
+                text=name,
+                variable=var
+            )
+            checkbox.pack(anchor=tk.W, pady=2)
+            
+            self.monster_checkboxes[monster_id] = (var, checkbox)
     
-    def on_monster_selection_change(self, event=None):
-        """Handle monster selection change - save immediately"""
-        self._save_current_level_changes()
-    
-    def clear_monster_selection(self):
-        """Clear all monster selections"""
-        self.allowed_monsters_listbox.selection_clear(0, tk.END)
+    def on_monster_checkbox_change(self, monster_id):
+        """Handle monster checkbox change - save immediately"""
         self._save_current_level_changes()
     
     def on_level_select(self, event):
@@ -1976,34 +1991,15 @@ class GameObjectEditor:
         self.max_monsters_var.set(str(level.get("max_monsters_per_room", 1)))
         self.chest_count_var.set(str(level.get("chest_count", 5)))
         
-        # Select allowed monsters
-        self.allowed_monsters_listbox.selection_clear(0, tk.END)
+        # Set allowed monsters checkboxes
         allowed = level.get("allowed_monsters", [])
         print(f"[EDITOR] Loading level - allowed_monsters: {allowed}")  # Debug
         
-        # Get monster names for matching
-        monsters = []
-        for obj in self.config.get("game_objects", []):
-            if obj.get("object_type") == "character":
-                monster = obj.get("monster", False)
-                if isinstance(monster, bool) and monster:
-                    monsters.append(obj)
-                elif isinstance(monster, str) and monster.lower() == "true":
-                    monsters.append(obj)
-                elif "properties" in obj and obj["properties"].get("monster") == "true":
-                    monsters.append(obj)
+        # Update checkboxes based on allowed monsters
+        for monster_id, (var, checkbox) in self.monster_checkboxes.items():
+            var.set(monster_id in allowed)
         
-        monsters.sort(key=lambda x: x.get("name", x.get("id", "")))
-        print(f"[EDITOR] Found {len(monsters)} monsters in config")  # Debug
-        
-        # Match allowed monster IDs to listbox indices
-        selected_count = 0
-        for i, monster in enumerate(monsters):
-            monster_id = monster.get("id", "")
-            if monster_id in allowed:
-                self.allowed_monsters_listbox.selection_set(i)
-                selected_count += 1
-        print(f"[EDITOR] Selected {selected_count} monsters in listbox")  # Debug
+        print(f"[EDITOR] Set {len([m for m in allowed if m in self.monster_checkboxes])} monster checkboxes")  # Debug
     
     def add_level(self):
         """Add a new level"""
@@ -2114,21 +2110,12 @@ class GameObjectEditor:
             level["max_monsters_per_room"] = int(self.max_monsters_var.get())
             level["chest_count"] = int(self.chest_count_var.get())
             
-            # Get selected monsters
-            selected_indices = self.allowed_monsters_listbox.curselection()
-            monsters = []
-            for obj in self.config.get("game_objects", []):
-                if obj.get("object_type") == "character":
-                    monster = obj.get("monster", False)
-                    if isinstance(monster, bool) and monster:
-                        monsters.append(obj)
-                    elif isinstance(monster, str) and monster.lower() == "true":
-                        monsters.append(obj)
-                    elif "properties" in obj and obj["properties"].get("monster") == "true":
-                        monsters.append(obj)
-            
-            monsters.sort(key=lambda x: x.get("name", x.get("id", "")))
-            allowed_ids = [monsters[i].get("id", "") for i in selected_indices if i < len(monsters)]
+            # Get selected monsters from checkboxes
+            allowed_ids = [
+                monster_id 
+                for monster_id, (var, _) in self.monster_checkboxes.items() 
+                if var.get()
+            ]
             level["allowed_monsters"] = allowed_ids
             print(f"[EDITOR] Saved {len(allowed_ids)} allowed monsters: {allowed_ids}")  # Debug
             
