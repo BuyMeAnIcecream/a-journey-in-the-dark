@@ -112,6 +112,17 @@
             width: 320px;
             height: 320px;
             flex-shrink: 0;
+            position: relative;
+        }
+        
+        #lightingOverlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 320px;
+            height: 320px;
+            pointer-events: none;
+            z-index: 10;
         }
         
         #status {
@@ -199,13 +210,17 @@
                 <div id="playerList" style="font-size: 12px; margin-top: 5px;"></div>
             </div>
         </div>
-        <canvas id="gameContainer"></canvas>
+        <div style="position: relative;">
+            <canvas id="gameContainer"></canvas>
+            <canvas id="lightingOverlay"></canvas>
+        </div>
     </div>
     <div id="status">Connecting...</div>
     <div id="controls">Use Arrow Keys or WASD to move</div>
     <div id="console"></div>
     
     <script src="/client/gameconsole.js"></script>
+    <script src="/client/webgl_lighting.js"></script>
     <script src="/client/game.js"></script>
 </body>
 </html>

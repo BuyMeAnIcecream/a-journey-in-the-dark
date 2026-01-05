@@ -31,12 +31,9 @@ pub type Tx = broadcast::Sender<String>;
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct EntityData {
     pub id: String,
-    pub object_id: String,  // Reference to GameObject (e.g., "orc", "player")
+    pub object_id: String,  // Reference to GameObject (e.g., "orc", "player") - client looks up sprites from this
     pub x: usize,
     pub y: usize,
-    pub sprite_x: u32,
-    pub sprite_y: u32,
-    pub sprite_sheet: Option<String>,
     pub controller: EntityController,
     pub current_health: u32,
     pub max_health: u32,
@@ -50,27 +47,19 @@ pub struct EntityData {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct ConsumableData {
     pub id: String,
-    pub object_id: String,
+    pub object_id: String,  // Reference to GameObject - client looks up sprites from this
     pub x: usize,
     pub y: usize,
-    pub sprite_x: u32,
-    pub sprite_y: u32,
-    pub sprite_sheet: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct ChestData {
     pub id: String,
-    pub object_id: String,  // Closed chest sprite
-    pub open_object_id: Option<String>,  // Open chest sprite (if different)
+    pub object_id: String,  // Reference to GameObject (contains interactable data) - client looks up sprites from this
+    pub open_object_id: Option<String>,  // Deprecated - no longer used
     pub x: usize,
     pub y: usize,
-    pub sprite_x: u32,
-    pub sprite_y: u32,
-    pub open_sprite_x: u32,
-    pub open_sprite_y: u32,
-    pub sprite_sheet: Option<String>,
-    pub is_open: bool,
+    pub is_open: bool,  // Current state: false = closed (sprites[0]), true = open (sprites[1])
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -81,9 +70,16 @@ pub struct PlayerData {
     pub has_acted_this_turn: bool,  // Whether this player has taken their turn this round
 }
 
+// Lightweight tile data for transmission (without sprites array)
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct TileData {
+    pub walkable: bool,
+    pub tile_id: String,  // GameObject ID for client-side sprite lookup
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct GameUpdate {
-    pub map: Vec<Vec<crate::tile::Tile>>,
+    pub map: Vec<Vec<TileData>>,  // Lightweight tiles without sprites array
     pub entities: Vec<EntityData>,  // All entities (player + AI)
     pub consumables: Vec<ConsumableData>,  // All consumables on the map
     pub chests: Vec<ChestData>,  // All chests on the map
@@ -111,20 +107,11 @@ pub fn game_state_to_update(
     let entities: Vec<EntityData> = game.entities.iter()
         .filter(|e| e.is_alive())  // Only send alive entities
         .map(|entity| {
-            let obj = game.object_registry.get_object(&entity.object_id);
-            let (sprite_x, sprite_y) = obj
-                .and_then(|o| o.get_sprites_vec().first().map(|s| (s.x, s.y)))
-                .unwrap_or((0, 0));
-            let sprite_sheet = obj.and_then(|o| o.sprite_sheet.clone());
-            
             EntityData {
                 id: entity.id.clone(),
                 object_id: entity.object_id.clone(),
                 x: entity.x,
                 y: entity.y,
-                sprite_x,
-                sprite_y,
-                sprite_sheet,
                 controller: entity.controller,
                 current_health: entity.current_health,
                 max_health: entity.max_health,
@@ -140,20 +127,11 @@ pub fn game_state_to_update(
     // Convert consumables to ConsumableData
     let consumables: Vec<ConsumableData> = game.consumables.iter()
         .map(|consumable| {
-            let obj = game.object_registry.get_object(&consumable.object_id);
-            let (sprite_x, sprite_y) = obj
-                .and_then(|o| o.get_sprites_vec().first().map(|s| (s.x, s.y)))
-                .unwrap_or((0, 0));
-            let sprite_sheet = obj.and_then(|o| o.sprite_sheet.clone());
-            
             ConsumableData {
                 id: consumable.id.clone(),
                 object_id: consumable.object_id.clone(),
                 x: consumable.x,
                 y: consumable.y,
-                sprite_x,
-                sprite_y,
-                sprite_sheet,
             }
         })
         .collect();
@@ -161,55 +139,13 @@ pub fn game_state_to_update(
     // Convert chests to ChestData
     let chests: Vec<ChestData> = game.chests.iter()
         .map(|chest| {
-            // Get chest object
-            let chest_obj = game.object_registry.get_object(&chest.object_id);
-            
-            // Get before (closed) sprite coordinates
-            let (sprite_x, sprite_y) = if let Some(obj) = chest_obj {
-                let before_sprites = obj.get_interactable_sprites(false);
-                if let Some(sprite) = before_sprites.first() {
-                    eprintln!("[CHEST] Chest {} at ({}, {}): closed sprite = ({}, {}), is_open = {}", 
-                        chest.id, chest.x, chest.y, sprite.x, sprite.y, chest.is_open);
-                    (sprite.x, sprite.y)
-                } else {
-                    eprintln!("WARNING: Chest object '{}' has no sprites for before state at ({}, {})", 
-                        chest.object_id, chest.x, chest.y);
-                    (0, 0)
-                }
-            } else {
-                eprintln!("WARNING: Chest object '{}' not found for chest at ({}, {})", 
-                    chest.object_id, chest.x, chest.y);
-                (0, 0)
-            };
-            
-            // Get after (open) sprite coordinates
-            let (open_sprite_x, open_sprite_y) = if let Some(obj) = chest_obj {
-                let after_sprites = obj.get_interactable_sprites(true);
-                if let Some(sprite) = after_sprites.first() {
-                    (sprite.x, sprite.y)
-                } else {
-                    eprintln!("WARNING: Chest object '{}' has no sprites for after state at ({}, {}), using before sprite", 
-                        chest.object_id, chest.x, chest.y);
-                    (sprite_x, sprite_y)  // Fallback to before sprite
-                }
-            } else {
-                (sprite_x, sprite_y)  // Fallback to before sprite if object not found
-            };
-            
-            let sprite_sheet = chest_obj.and_then(|o| o.sprite_sheet.clone());
-            
             ChestData {
                 id: chest.id.clone(),
                 object_id: chest.object_id.clone(),  // Chest object ID (contains interactable data)
                 open_object_id: None,  // Deprecated - no longer used
                 x: chest.x,
                 y: chest.y,
-                sprite_x,  // Before (closed) state sprite coordinates
-                sprite_y,  // Before (closed) state sprite coordinates
-                open_sprite_x,  // After (open) state sprite coordinates
-                open_sprite_y,  // After (open) state sprite coordinates
-                sprite_sheet,
-                is_open: chest.is_open,  // Current state: false = before (closed), true = after (open)
+                is_open: chest.is_open,  // Current state: false = closed (sprites[0]), true = open (sprites[1])
             }
         })
         .collect();
@@ -253,8 +189,18 @@ pub fn game_state_to_update(
         false
     };
     
+    // Convert tiles to lightweight format (without sprites array)
+    let map: Vec<Vec<TileData>> = game.dungeon.tiles.iter()
+        .map(|row| row.iter()
+            .map(|tile| TileData {
+                walkable: tile.walkable,
+                tile_id: tile.tile_id.clone(),
+            })
+            .collect())
+        .collect();
+    
     GameUpdate {
-        map: game.dungeon.tiles.clone(),
+        map,
         entities,
         consumables,
         chests,
@@ -283,6 +229,20 @@ pub async fn index() -> Html<&'static str> {
 
 pub async fn schema_endpoint() -> Json<schema::GameObjectSchema> {
     Json(schema::GameObjectSchema::generate())
+}
+
+/// Endpoint to get game config (for client-side sprite lookups)
+pub async fn config_endpoint() -> Json<crate::config::GameConfig> {
+    let config = match crate::config::GameConfig::load("game_config.toml") {
+        Ok(cfg) => cfg,
+        Err(_) => {
+            // If config doesn't exist, create default
+            let default_config = create_default_config();
+            let _ = default_config.save("game_config.toml");
+            default_config
+        }
+    };
+    Json(config)
 }
 
 pub async fn generate_map_endpoint(
@@ -376,33 +336,44 @@ async fn handle_socket(socket: WebSocket, state: SharedState, tx: Tx) {
         eprintln!("[WS] Players after add: {}", player_count_after);
     }
 
-    // Send initial game state
+    // Prepare initial game state
     let initial_state = {
         let game = state.lock().unwrap();
         let mut update = game_state_to_update(&game, Some(&player_id));
         update.all_players_dead = game.are_all_players_dead();
         let json_str = serde_json::to_string(&update).unwrap();
-        log_debug(&format!("[WS] Sending initial game state to {}: {} bytes, {} entities, {} players", 
+        log_debug(&format!("[WS] Prepared initial game state for {}: {} bytes, {} entities, {} players", 
             player_id, json_str.len(), update.entities.len(), update.players.len()));
         json_str
     };
+
+    // Small delay to ensure WebSocket connection is fully established
+    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+    // Send initial state synchronously BEFORE spawning tasks to ensure it's sent
+    log_debug(&format!("[WS] Sending initial state to {} synchronously", player_id));
     match sender.send(Message::Text(initial_state.clone())).await {
         Ok(_) => {
-            log_debug(&format!("[WS] Successfully sent initial game state to {}", player_id));
-            // Flush to ensure message is sent immediately
-            if let Err(e) = sender.flush().await {
-                log_debug(&format!("[WS] Failed to flush initial game state to {}: {:?}", player_id, e));
+            log_debug(&format!("[WS] Successfully sent initial state to {}", player_id));
+            match sender.flush().await {
+                Ok(_) => {
+                    log_debug(&format!("[WS] Successfully flushed initial state to {}", player_id));
+                }
+                Err(e) => {
+                    log_debug(&format!("[WS] Failed to flush initial state to {}: {:?}", player_id, e));
+                }
             }
         }
         Err(e) => {
-            log_debug(&format!("[WS] Failed to send initial game state to {}: {:?}", player_id, e));
+            log_debug(&format!("[WS] Failed to send initial state to {}: {:?}", player_id, e));
         }
     }
 
-    // Spawn task to send updates to client
+    // Spawn task to send updates to client (from broadcast channel)
     let player_id_for_send_cleanup = player_id.clone();
     let state_for_send_cleanup = state.clone();
     let mut send_task = tokio::spawn(async move {
+        // Handle updates from broadcast channel
         while let Ok(msg) = rx.recv().await {
             if sender.send(Message::Text(msg)).await.is_err() {
                 break;
@@ -422,20 +393,46 @@ async fn handle_socket(socket: WebSocket, state: SharedState, tx: Tx) {
     let player_id_clone = player_id.clone();
     let state_for_recv = state.clone();
     let mut recv_task = tokio::spawn(async move {
-        while let Some(Ok(Message::Text(text))) = receiver.next().await {
-            if let Ok(cmd) = serde_json::from_str::<PlayerCommand>(&text) {
-                let mut game = state_for_recv.lock().unwrap();
-                let (combat_messages, level_complete, restart_confirmed) = game.handle_command(&cmd, &player_id_clone);
-                
-                // Create update with messages
-                let mut update = game_state_to_update(&game, Some(&player_id_clone));
-                update.messages = combat_messages;
-                update.level_complete = level_complete;
-                update.restart_confirmed = restart_confirmed;
-                update.all_players_dead = game.are_all_players_dead();
-                
-                let update_str = serde_json::to_string(&update).unwrap();
-                let _ = tx.send(update_str);
+        log_debug(&format!("[WS] Starting receiver task for {}", player_id_clone));
+        loop {
+            match receiver.next().await {
+                Some(Ok(Message::Text(text))) => {
+                    log_debug(&format!("[WS] Received message from {}: {} bytes", player_id_clone, text.len()));
+                    // Handle ping messages
+                    if text == r#"{"action":"ping"}"# {
+                        log_debug(&format!("[WS] Received ping from {}", player_id_clone));
+                        continue;
+                    }
+                    if let Ok(cmd) = serde_json::from_str::<PlayerCommand>(&text) {
+                        let mut game = state_for_recv.lock().unwrap();
+                        let (combat_messages, level_complete, restart_confirmed) = game.handle_command(&cmd, &player_id_clone);
+                        
+                        // Create update with messages
+                        let mut update = game_state_to_update(&game, Some(&player_id_clone));
+                        update.messages = combat_messages;
+                        update.level_complete = level_complete;
+                        update.restart_confirmed = restart_confirmed;
+                        update.all_players_dead = game.are_all_players_dead();
+                        
+                        let update_str = serde_json::to_string(&update).unwrap();
+                        let _ = tx.send(update_str);
+                    }
+                }
+                Some(Ok(Message::Close(_))) => {
+                    log_debug(&format!("[WS] Received close message from {}", player_id_clone));
+                    break;
+                }
+                Some(Err(e)) => {
+                    log_debug(&format!("[WS] Error receiving message from {}: {:?}", player_id_clone, e));
+                    break;
+                }
+                None => {
+                    log_debug(&format!("[WS] Receiver stream ended for {}", player_id_clone));
+                    break;
+                }
+                _ => {
+                    // Ignore other message types (Ping, Pong, Binary)
+                }
             }
         }
     });

@@ -5,8 +5,9 @@ use rand::Rng;
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Tile {
     pub walkable: bool,
-    pub sprite_x: u32,  // X coordinate in sprite sheet (in tiles) - selected sprite
-    pub sprite_y: u32,  // Y coordinate in sprite sheet (in tiles) - selected sprite
+    pub tile_id: String,  // GameObject ID this tile came from (for client-side sprite lookup)
+    pub sprite_x: u32,  // X coordinate in sprite sheet (in tiles) - selected sprite (kept for server-side use)
+    pub sprite_y: u32,  // Y coordinate in sprite sheet (in tiles) - selected sprite (kept for server-side use)
     #[serde(default)]
     pub sprites: Vec<SpriteCoord>,  // All possible sprites for randomization
 }
@@ -28,6 +29,7 @@ impl From<&GameObject> for Tile {
         
         Self {
             walkable: obj.walkable,
+            tile_id: obj.id.clone(),
             sprite_x: selected.x,
             sprite_y: selected.y,
             sprites,
@@ -39,6 +41,17 @@ impl Tile {
     pub fn new(walkable: bool, sprite_x: u32, sprite_y: u32) -> Self {
         Self {
             walkable,
+            tile_id: format!("tile_{}_{}", sprite_x, sprite_y),  // Fallback ID for legacy tiles
+            sprite_x,
+            sprite_y,
+            sprites: vec![SpriteCoord { x: sprite_x, y: sprite_y }],
+        }
+    }
+    
+    pub fn new_with_id(walkable: bool, tile_id: String, sprite_x: u32, sprite_y: u32) -> Self {
+        Self {
+            walkable,
+            tile_id,
             sprite_x,
             sprite_y,
             sprites: vec![SpriteCoord { x: sprite_x, y: sprite_y }],
@@ -56,6 +69,25 @@ impl Tile {
         
         Self {
             walkable,
+            tile_id: format!("tile_{}_{}", selected.x, selected.y),  // Fallback ID
+            sprite_x: selected.x,
+            sprite_y: selected.y,
+            sprites,
+        }
+    }
+    
+    pub fn with_sprites_and_id(walkable: bool, tile_id: String, sprites: Vec<SpriteCoord>) -> Self {
+        let selected = if !sprites.is_empty() {
+            let mut rng = rand::thread_rng();
+            let idx = rng.gen_range(0..sprites.len());
+            sprites[idx]  // Copy trait allows this
+        } else {
+            SpriteCoord { x: 0, y: 0 }
+        };
+        
+        Self {
+            walkable,
+            tile_id,
             sprite_x: selected.x,
             sprite_y: selected.y,
             sprites,

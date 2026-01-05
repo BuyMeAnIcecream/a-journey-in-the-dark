@@ -61,6 +61,7 @@ async fn main() {
         .route("/ws", get(api::websocket_handler))
         .route("/api/map", get(api::generate_map_endpoint))
         .route("/api/schema", get(api::schema_endpoint))
+        .route("/api/config", get(api::config_endpoint))
         .nest_service("/assets", ServeDir::new("assets"))
         .nest_service("/client", ServeDir::new("client"))
         .with_state((state, tx));

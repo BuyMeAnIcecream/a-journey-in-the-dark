@@ -149,5 +149,5 @@ max_rooms = 7
 min_monsters_per_room = 0
 max_monsters_per_room = 2
 chest_count = 2
-allowed_monsters = []
+allowed_monsters = [ "orc", "week_ork",]
 

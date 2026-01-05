@@ -10,6 +10,9 @@ let spriteSheets = {};
 let spriteSheetLoaded = false;
 let statusDiv = null;
 let myPlayerId = null;  // Store this client's own player ID
+let gameConfig = null;  // Game config for sprite lookups
+let spriteLookup = new Map();  // object_id -> { sprite_x, sprite_y, sprite_sheet }
+let webglLighting = null;  // WebGL lighting overlay
 
 // Load a sprite sheet
 function loadSpriteSheet(name) {
@@ -41,9 +44,79 @@ function getSpriteSheet(name) {
     return spriteSheets[DEFAULT_SPRITE_SHEET] || null;
 }
 
+// Load game config for sprite lookups
+async function loadGameConfig() {
+    try {
+        const response = await fetch('/api/config');
+        gameConfig = await response.json();
+        
+        // Build sprite lookup map
+        if (gameConfig.game_objects) {
+            for (const obj of gameConfig.game_objects) {
+                const sprites = obj.sprites || [];
+                if (sprites.length > 0) {
+                    // For interactable objects, store both states
+                    if (obj.interactable) {
+                        // Before state (sprites[0])
+                        if (sprites[0]) {
+                            spriteLookup.set(`${obj.id}_before`, {
+                                sprite_x: sprites[0].x,
+                                sprite_y: sprites[0].y,
+                                sprite_sheet: obj.sprite_sheet || DEFAULT_SPRITE_SHEET
+                            });
+                        }
+                        // After state (sprites[1])
+                        if (sprites[1]) {
+                            spriteLookup.set(`${obj.id}_after`, {
+                                sprite_x: sprites[1].x,
+                                sprite_y: sprites[1].y,
+                                sprite_sheet: obj.sprite_sheet || DEFAULT_SPRITE_SHEET
+                            });
+                        }
+                    }
+                    // Default state (first sprite)
+                    spriteLookup.set(obj.id, {
+                        sprite_x: sprites[0].x,
+                        sprite_y: sprites[0].y,
+                        sprite_sheet: obj.sprite_sheet || DEFAULT_SPRITE_SHEET
+                    });
+                }
+            }
+        }
+        
+        console.log('[Client] Loaded game config, sprite lookup entries:', spriteLookup.size);
+    } catch (error) {
+        console.error('[Client] Failed to load game config:', error);
+    }
+}
+
+// Get sprite info from lookup
+function getSpriteInfo(objectId, isOpen = false) {
+    if (!objectId) {
+        console.warn('[CLIENT] getSpriteInfo called with undefined objectId');
+        return { sprite_x: 0, sprite_y: 0, sprite_sheet: DEFAULT_SPRITE_SHEET };
+    }
+    
+    // For interactable objects, use state-specific lookup
+    if (isOpen !== undefined) {
+        const key = isOpen ? `${objectId}_after` : `${objectId}_before`;
+        if (spriteLookup.has(key)) {
+            return spriteLookup.get(key);
+        }
+    }
+    // Fallback to default
+    const result = spriteLookup.get(objectId);
+    if (result) {
+        return result;
+    }
+    console.warn('[CLIENT] Sprite not found for objectId:', objectId, 'isOpen:', isOpen);
+    return { sprite_x: 0, sprite_y: 0, sprite_sheet: DEFAULT_SPRITE_SHEET };
+}
+
 // Load default sprite sheet
-function loadDefaultSpriteSheet() {
-    loadSpriteSheet(DEFAULT_SPRITE_SHEET)
+async function loadDefaultSpriteSheet() {
+    await loadGameConfig();
+    return loadSpriteSheet(DEFAULT_SPRITE_SHEET)
         .then(() => {
             spriteSheetLoaded = true;
             render(); // Always render, even without gameState (shows placeholder)
@@ -151,6 +224,16 @@ function render() {
     canvas.width = VIEWPORT_SIZE * TILE_SIZE;
     canvas.height = VIEWPORT_SIZE * TILE_SIZE;
     
+    // Also resize lighting overlay canvas
+    const lightingCanvas = document.getElementById('lightingOverlay');
+    if (lightingCanvas) {
+        lightingCanvas.width = canvas.width;
+        lightingCanvas.height = canvas.height;
+        if (webglLighting) {
+            webglLighting.resize();
+        }
+    }
+    
     // Clear canvas with transparent background to ensure proper transparency
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     
@@ -193,12 +276,25 @@ function render() {
                 continue;
             }
             
-            // Draw sprite from sprite sheet
-            const srcX = (tile.sprite_x || 0) * SPRITE_SHEET_TILE_SIZE;
-            const srcY = (tile.sprite_y || 0) * SPRITE_SHEET_TILE_SIZE;
+            // Get sprite info from tile_id (new format) or fallback to sprite_x/sprite_y (old format)
+            let spriteInfo;
+            if (tile.tile_id) {
+                spriteInfo = getSpriteInfo(tile.tile_id);
+            } else if (tile.sprite_x !== undefined && tile.sprite_y !== undefined) {
+                // Fallback for old format
+                spriteInfo = {
+                    sprite_x: tile.sprite_x,
+                    sprite_y: tile.sprite_y,
+                    sprite_sheet: DEFAULT_SPRITE_SHEET
+                };
+            } else {
+                spriteInfo = getSpriteInfo('wall_dirt_top');
+            }
+            const srcX = spriteInfo.sprite_x * SPRITE_SHEET_TILE_SIZE;
+            const srcY = spriteInfo.sprite_y * SPRITE_SHEET_TILE_SIZE;
             
-            // Check if sprite sheet is loaded (tiles use default sprite sheet)
-            const tileSpriteSheet = getSpriteSheet(DEFAULT_SPRITE_SHEET);
+            // Check if sprite sheet is loaded
+            const tileSpriteSheet = getSpriteSheet(spriteInfo.sprite_sheet);
             if (tileSpriteSheet && tileSpriteSheet.complete) {
                 // Ensure transparency is preserved for tiles
                 ctx.globalCompositeOperation = 'source-over';
@@ -241,20 +337,13 @@ function render() {
                 const destX = viewportX * TILE_SIZE + offsetX;
                 const destY = viewportY * TILE_SIZE + offsetY;
                 
-                // Get sprite sheet for this chest
-                const chestSpriteSheet = getSpriteSheet(chest.sprite_sheet || DEFAULT_SPRITE_SHEET);
+                // Get sprite info from object_id (closed state)
+                const spriteInfo = getSpriteInfo(chest.object_id, false);
+                const chestSpriteSheet = getSpriteSheet(spriteInfo.sprite_sheet);
                 
-                // Use closed chest sprite coordinates
-                const spriteX = chest.sprite_x;
-                const spriteY = chest.sprite_y;
-                
-                // Debug: log to verify we're using the right coordinates
-                console.log(`Closed chest at (${chestX}, ${chestY}): sprite=(${spriteX}, ${spriteY}), open_sprite=(${chest.open_sprite_x}, ${chest.open_sprite_y}), is_open=${chest.is_open}`);
-                
-                if (spriteX !== undefined && spriteY !== undefined && 
-                    chestSpriteSheet && chestSpriteSheet.complete) {
-                    const srcX = spriteX * SPRITE_SHEET_TILE_SIZE;
-                    const srcY = spriteY * SPRITE_SHEET_TILE_SIZE;
+                if (chestSpriteSheet && chestSpriteSheet.complete) {
+                    const srcX = spriteInfo.sprite_x * SPRITE_SHEET_TILE_SIZE;
+                    const srcY = spriteInfo.sprite_y * SPRITE_SHEET_TILE_SIZE;
                     
                     ctx.globalCompositeOperation = 'source-over';
                     ctx.imageSmoothingEnabled = false;
@@ -294,20 +383,13 @@ function render() {
                 const destX = viewportX * TILE_SIZE + offsetX;
                 const destY = viewportY * TILE_SIZE + offsetY;
                 
-                // Get sprite sheet for this chest
-                const chestSpriteSheet = getSpriteSheet(chest.sprite_sheet || DEFAULT_SPRITE_SHEET);
+                // Get sprite info from object_id (open state)
+                const spriteInfo = getSpriteInfo(chest.object_id, true);
+                const chestSpriteSheet = getSpriteSheet(spriteInfo.sprite_sheet);
                 
-                // Use open chest sprite coordinates
-                const spriteX = chest.open_sprite_x;
-                const spriteY = chest.open_sprite_y;
-                
-                // Debug: log to verify we're using the right coordinates
-                // console.log(`Open chest at (${chestX}, ${chestY}): sprite=(${chest.sprite_x}, ${chest.sprite_y}), open_sprite=(${spriteX}, ${spriteY}), is_open=${chest.is_open}`);
-                
-                if (spriteX !== undefined && spriteY !== undefined && 
-                    chestSpriteSheet && chestSpriteSheet.complete) {
-                    const srcX = spriteX * SPRITE_SHEET_TILE_SIZE;
-                    const srcY = spriteY * SPRITE_SHEET_TILE_SIZE;
+                if (chestSpriteSheet && chestSpriteSheet.complete) {
+                    const srcX = spriteInfo.sprite_x * SPRITE_SHEET_TILE_SIZE;
+                    const srcY = spriteInfo.sprite_y * SPRITE_SHEET_TILE_SIZE;
                     
                     ctx.globalCompositeOperation = 'source-over';
                     ctx.imageSmoothingEnabled = false;
@@ -342,13 +424,13 @@ function render() {
             const destY = viewportY * TILE_SIZE + offsetY;
             
             // Get sprite sheet for this entity
-            const entitySpriteSheetName = entity.sprite_sheet || DEFAULT_SPRITE_SHEET;
-            const entitySpriteSheet = getSpriteSheet(entitySpriteSheetName);
+            // Get sprite info from object_id
+            const spriteInfo = getSpriteInfo(entity.object_id);
+            const entitySpriteSheet = getSpriteSheet(spriteInfo.sprite_sheet);
             
-            if (entity.sprite_x !== undefined && entity.sprite_y !== undefined && 
-                entitySpriteSheet && entitySpriteSheet.complete) {
-                const srcX = entity.sprite_x * SPRITE_SHEET_TILE_SIZE;
-                const srcY = entity.sprite_y * SPRITE_SHEET_TILE_SIZE;
+            if (entitySpriteSheet && entitySpriteSheet.complete) {
+                const srcX = spriteInfo.sprite_x * SPRITE_SHEET_TILE_SIZE;
+                const srcY = spriteInfo.sprite_y * SPRITE_SHEET_TILE_SIZE;
                 
                 // Save canvas state
                 ctx.save();
@@ -418,12 +500,13 @@ function render() {
                 const destY = viewportY * TILE_SIZE + offsetY;
                 
                 // Get sprite sheet for this consumable
-                const consumableSpriteSheet = getSpriteSheet(consumable.sprite_sheet || DEFAULT_SPRITE_SHEET);
+                // Get sprite info from object_id
+                const spriteInfo = getSpriteInfo(consumable.object_id);
+                const consumableSpriteSheet = getSpriteSheet(spriteInfo.sprite_sheet);
                 
-                if (consumable.sprite_x !== undefined && consumable.sprite_y !== undefined && 
-                    consumableSpriteSheet && consumableSpriteSheet.complete) {
-                    const srcX = consumable.sprite_x * SPRITE_SHEET_TILE_SIZE;
-                    const srcY = consumable.sprite_y * SPRITE_SHEET_TILE_SIZE;
+                if (consumableSpriteSheet && consumableSpriteSheet.complete) {
+                    const srcX = spriteInfo.sprite_x * SPRITE_SHEET_TILE_SIZE;
+                    const srcY = spriteInfo.sprite_y * SPRITE_SHEET_TILE_SIZE;
                     
                     ctx.globalCompositeOperation = 'source-over';
                     ctx.imageSmoothingEnabled = false;
@@ -507,6 +590,11 @@ function render() {
         ctx.fillStyle = '#ffffff';
         ctx.font = '20px Arial';
         ctx.fillText('Waiting for all players to confirm restart...', canvas.width / 2, canvas.height / 2 + 20);
+    }
+    
+    // Apply WebGL lighting overlay (after all Canvas 2D rendering)
+    if (webglLighting && playerFound) {
+        webglLighting.render(playerX, playerY, viewportMinX, viewportMinY, offsetX, offsetY, TILE_SIZE);
     }
 }
 
@@ -630,7 +718,8 @@ function updateHealthBar() {
 
 // Handle game state updates
 async function handleGameStateUpdate(newGameState) {
-    gameState = newGameState;
+    try {
+        gameState = newGameState;
     
     // Store our player ID from the first update (if not already stored)
     if (!myPlayerId && gameState.current_player_id) {
@@ -724,37 +813,48 @@ async function handleGameStateUpdate(newGameState) {
         }
     }
     
-    // Load sprite sheets for all entities and consumables (wait for all to load)
+    // Load sprite sheets based on sprite lookup (from config)
     const spriteSheetPromises = [];
+    const spriteSheetsToLoad = new Set();
+    
+    // Collect all sprite sheets needed
     if (gameState.entities) {
         for (const entity of gameState.entities) {
-            if (entity.sprite_sheet) {
-                spriteSheetPromises.push(
-                    loadSpriteSheet(entity.sprite_sheet)
-                        .catch((e) => console.error(`Could not load sprite sheet "${entity.sprite_sheet}":`, e))
-                );
-            }
+            const spriteInfo = getSpriteInfo(entity.object_id);
+            spriteSheetsToLoad.add(spriteInfo.sprite_sheet);
         }
     }
     if (gameState.consumables) {
         for (const consumable of gameState.consumables) {
-            if (consumable.sprite_sheet) {
-                await loadSpriteSheet(consumable.sprite_sheet);
+            const spriteInfo = getSpriteInfo(consumable.object_id);
+            spriteSheetsToLoad.add(spriteInfo.sprite_sheet);
+        }
+    }
+    if (gameState.chests) {
+        for (const chest of gameState.chests) {
+            const spriteInfo = getSpriteInfo(chest.object_id, chest.is_open);
+            spriteSheetsToLoad.add(spriteInfo.sprite_sheet);
+        }
+    }
+    if (gameState.map) {
+        for (const row of gameState.map) {
+            for (const tile of row) {
+                if (tile && tile.tile_id) {
+                    const spriteInfo = getSpriteInfo(tile.tile_id);
+                    spriteSheetsToLoad.add(spriteInfo.sprite_sheet);
+                }
             }
         }
     }
     
-    // Load sprite sheets for all chests
-    if (gameState.chests) {
-        for (const chest of gameState.chests) {
-            if (chest.sprite_sheet) {
-                spriteSheetPromises.push(
-                    loadSpriteSheet(chest.sprite_sheet)
-                        .catch((e) => console.error(`Could not load sprite sheet "${chest.sprite_sheet}":`, e))
-                );
-            }
-        }
+    // Load all needed sprite sheets
+    for (const sheetName of spriteSheetsToLoad) {
+        spriteSheetPromises.push(
+            loadSpriteSheet(sheetName)
+                .catch((e) => console.error(`Could not load sprite sheet "${sheetName}":`, e))
+        );
     }
+    
     // Wait for all sprite sheets to load before rendering
     await Promise.all(spriteSheetPromises);
     
@@ -773,6 +873,12 @@ async function handleGameStateUpdate(newGameState) {
     updateHealthBar();
     
     render();
+    console.log('[CLIENT] handleGameStateUpdate completed successfully');
+    } catch (error) {
+        console.error('[CLIENT] Error in handleGameStateUpdate:', error);
+        console.error('[CLIENT] Error stack:', error.stack);
+        throw error;
+    }
 }
 
 // Initialize WebSocket connection
@@ -786,9 +892,41 @@ function connect() {
     ws = new WebSocket(wsUrl);
     
     ws.onopen = () => {
+        console.log('[CLIENT] WebSocket connection opened, readyState:', ws.readyState);
         if (statusDiv) {
             statusDiv.textContent = 'Connected - Waiting for game state...';
         }
+        
+        // Send a ping message to keep connection alive and verify bidirectional communication
+        try {
+            ws.send(JSON.stringify({ action: 'ping' }));
+            console.log('[CLIENT] Sent ping message to server');
+        } catch (error) {
+            console.error('[CLIENT] Failed to send ping:', error);
+        }
+        
+        // Send a ping to keep connection alive and verify it's working
+        setTimeout(() => {
+            if (ws.readyState === WebSocket.OPEN) {
+                console.log('[CLIENT] WebSocket still open after 1 second, readyState:', ws.readyState);
+                console.log('[CLIENT] Buffered amount:', ws.bufferedAmount);
+            } else {
+                console.warn('[CLIENT] WebSocket closed unexpectedly, readyState:', ws.readyState);
+            }
+        }, 1000);
+        
+        // Check again after 3 seconds to see if message arrived
+        setTimeout(() => {
+            if (ws.readyState === WebSocket.OPEN) {
+                console.log('[CLIENT] WebSocket still open after 3 seconds');
+                if (!gameState) {
+                    console.warn('[CLIENT] Still no game state received after 3 seconds');
+                    if (statusDiv) {
+                        statusDiv.textContent = 'Connected but no game state received - Check server logs';
+                    }
+                }
+            }
+        }, 3000);
     };
     
     ws.onerror = (error) => {
@@ -800,29 +938,46 @@ function connect() {
     
     ws.onmessage = async (event) => {
         console.log('[CLIENT] Received WebSocket message, length:', event.data.length);
+        console.log('[CLIENT] Message type:', typeof event.data);
+        console.log('[CLIENT] First 100 chars:', event.data.substring(0, 100));
         try {
             const newGameState = JSON.parse(event.data);
             console.log('[CLIENT] Parsed game state:', {
                 hasMap: !!newGameState.map,
                 mapSize: newGameState.map ? `${newGameState.width}x${newGameState.height}` : 'none',
                 entities: newGameState.entities?.length || 0,
-                players: newGameState.players?.length || 0
+                players: newGameState.players?.length || 0,
+                sampleTile: newGameState.map?.[0]?.[0]
             });
+            console.log('[CLIENT] Calling handleGameStateUpdate...');
             await handleGameStateUpdate(newGameState);
-        } catch (error) {
-            console.error('Error parsing game state:', error);
-            console.error('Raw data (first 500 chars):', event.data.substring(0, 500));
+            console.log('[CLIENT] handleGameStateUpdate completed');
             if (statusDiv) {
-                statusDiv.textContent = 'Error parsing game state - Check console';
+                statusDiv.textContent = 'Connected';
+            }
+        } catch (error) {
+            console.error('[CLIENT] Error in onmessage:', error);
+            console.error('[CLIENT] Error stack:', error.stack);
+            console.error('[CLIENT] Raw data (first 500 chars):', event.data.substring(0, 500));
+            if (statusDiv) {
+                statusDiv.textContent = 'Error: ' + error.message;
             }
         }
     };
     
-    ws.onclose = () => {
+    ws.onclose = (event) => {
+        console.log('[CLIENT] WebSocket closed:', event.code, event.reason, event.wasClean);
         if (statusDiv) {
             statusDiv.textContent = 'Disconnected. Reconnecting...';
         }
         setTimeout(connect, 1000);
+    };
+    
+    ws.onerror = (error) => {
+        console.error('[CLIENT] WebSocket error:', error);
+        if (statusDiv) {
+            statusDiv.textContent = 'WebSocket error - Check console';
+        }
     };
 }
 
@@ -955,6 +1110,23 @@ function init() {
     
     // Initial render to show placeholder
     render();
+    
+    // Initialize WebGL lighting overlay (on separate canvas)
+    const lightingCanvas = document.getElementById('lightingOverlay');
+    if (lightingCanvas) {
+        // Match the main canvas size
+        const mainCanvas = document.getElementById('gameContainer');
+        if (mainCanvas) {
+            lightingCanvas.width = mainCanvas.width;
+            lightingCanvas.height = mainCanvas.height;
+        }
+        try {
+            webglLighting = new WebGLLighting(lightingCanvas);
+            console.log('[Client] WebGL lighting initialized');
+        } catch (error) {
+            console.warn('[Client] WebGL lighting not available:', error);
+        }
+    }
     
     // Load default sprite sheet and start connection
     loadDefaultSpriteSheet();
