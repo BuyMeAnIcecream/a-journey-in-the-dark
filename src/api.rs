@@ -389,6 +389,10 @@ async fn handle_socket(socket: WebSocket, state: SharedState, tx: Tx) {
     match sender.send(Message::Text(initial_state.clone())).await {
         Ok(_) => {
             log_debug(&format!("[WS] Successfully sent initial game state to {}", player_id));
+            // Flush to ensure message is sent immediately
+            if let Err(e) = sender.flush().await {
+                log_debug(&format!("[WS] Failed to flush initial game state to {}: {:?}", player_id, e));
+            }
         }
         Err(e) => {
             log_debug(&format!("[WS] Failed to send initial game state to {}: {:?}", player_id, e));
