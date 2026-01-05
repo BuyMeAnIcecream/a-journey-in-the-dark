@@ -381,9 +381,19 @@ async fn handle_socket(socket: WebSocket, state: SharedState, tx: Tx) {
         let game = state.lock().unwrap();
         let mut update = game_state_to_update(&game, Some(&player_id));
         update.all_players_dead = game.are_all_players_dead();
-        serde_json::to_string(&update).unwrap()
+        let json_str = serde_json::to_string(&update).unwrap();
+        log_debug(&format!("[WS] Sending initial game state to {}: {} bytes, {} entities, {} players", 
+            player_id, json_str.len(), update.entities.len(), update.players.len()));
+        json_str
     };
-    let _ = sender.send(Message::Text(initial_state)).await;
+    match sender.send(Message::Text(initial_state.clone())).await {
+        Ok(_) => {
+            log_debug(&format!("[WS] Successfully sent initial game state to {}", player_id));
+        }
+        Err(e) => {
+            log_debug(&format!("[WS] Failed to send initial game state to {}: {:?}", player_id, e));
+        }
+    }
 
     // Spawn task to send updates to client
     let player_id_for_send_cleanup = player_id.clone();

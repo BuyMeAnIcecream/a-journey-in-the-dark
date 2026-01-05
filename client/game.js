@@ -799,8 +799,15 @@ function connect() {
     };
     
     ws.onmessage = async (event) => {
+        console.log('[CLIENT] Received WebSocket message, length:', event.data.length);
         try {
             const newGameState = JSON.parse(event.data);
+            console.log('[CLIENT] Parsed game state:', {
+                hasMap: !!newGameState.map,
+                mapSize: newGameState.map ? `${newGameState.width}x${newGameState.height}` : 'none',
+                entities: newGameState.entities?.length || 0,
+                players: newGameState.players?.length || 0
+            });
             await handleGameStateUpdate(newGameState);
         } catch (error) {
             console.error('Error parsing game state:', error);
