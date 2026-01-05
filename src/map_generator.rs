@@ -64,8 +64,8 @@ impl MapGenerator {
         let monster_templates = if let Some(level) = level_config {
             // Filter monsters to only those allowed in this level
             if level.allowed_monsters.is_empty() {
-                // If allowed_monsters is empty, use all monsters
-                object_registry.get_monster_characters()
+                // If allowed_monsters is empty, spawn no monsters
+                Vec::new()
             } else {
                 let allowed: std::collections::HashSet<&str> = level.allowed_monsters.iter().map(|s| s.as_str()).collect();
                 object_registry.get_monster_characters()

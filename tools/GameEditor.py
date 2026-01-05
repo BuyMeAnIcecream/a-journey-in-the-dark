@@ -1820,6 +1820,11 @@ class GameObjectEditor:
         ttk.Label(middle_panel, text="Allowed Monsters:", font=("Arial", 10, "bold")).grid(
             row=6, column=0, columnspan=2, sticky=tk.W, pady=(20, 5))
         
+        # Instructions
+        ttk.Label(middle_panel, text="(Select monsters to allow in this level)", 
+                 font=("Arial", 8), foreground="gray").grid(
+            row=6, column=1, sticky=tk.E, pady=(20, 5))
+        
         # Monster selection listbox
         monster_list_frame = ttk.Frame(middle_panel)
         monster_list_frame.grid(row=7, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=5)
@@ -1831,6 +1836,14 @@ class GameObjectEditor:
                                                    height=8, selectmode=tk.MULTIPLE)
         self.allowed_monsters_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         monster_scrollbar.config(command=self.allowed_monsters_listbox.yview)
+        
+        # Bind selection change to save
+        self.allowed_monsters_listbox.bind('<<ListboxSelect>>', self.on_monster_selection_change)
+        
+        # Add a button to clear selection
+        clear_monsters_btn = ttk.Button(middle_panel, text="Clear Selection", 
+                                       command=self.clear_monster_selection)
+        clear_monsters_btn.grid(row=8, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=5)
         
         # Populate monster list with available monsters
         self.refresh_monster_list()
@@ -1931,6 +1944,15 @@ class GameObjectEditor:
         for monster in monsters:
             name = monster.get("name", monster.get("id", "Unknown"))
             self.allowed_monsters_listbox.insert(tk.END, name)
+    
+    def on_monster_selection_change(self, event=None):
+        """Handle monster selection change - save immediately"""
+        self._save_current_level_changes()
+    
+    def clear_monster_selection(self):
+        """Clear all monster selections"""
+        self.allowed_monsters_listbox.selection_clear(0, tk.END)
+        self._save_current_level_changes()
     
     def on_level_select(self, event):
         """Handle level selection"""
@@ -2100,8 +2122,9 @@ class GameObjectEditor:
                         monsters.append(obj)
             
             monsters.sort(key=lambda x: x.get("name", x.get("id", "")))
-            allowed_ids = [monsters[i].get("id", "") for i in selected_indices]
+            allowed_ids = [monsters[i].get("id", "") for i in selected_indices if i < len(monsters)]
             level["allowed_monsters"] = allowed_ids
+            print(f"[EDITOR] Saved {len(allowed_ids)} allowed monsters: {allowed_ids}")  # Debug
             
             self.save_config()
         except (ValueError, IndexError):
