@@ -1979,6 +1979,7 @@ class GameObjectEditor:
         # Select allowed monsters
         self.allowed_monsters_listbox.selection_clear(0, tk.END)
         allowed = level.get("allowed_monsters", [])
+        print(f"[EDITOR] Loading level - allowed_monsters: {allowed}")  # Debug
         
         # Get monster names for matching
         monsters = []
@@ -1993,11 +1994,16 @@ class GameObjectEditor:
                     monsters.append(obj)
         
         monsters.sort(key=lambda x: x.get("name", x.get("id", "")))
+        print(f"[EDITOR] Found {len(monsters)} monsters in config")  # Debug
         
+        # Match allowed monster IDs to listbox indices
+        selected_count = 0
         for i, monster in enumerate(monsters):
             monster_id = monster.get("id", "")
             if monster_id in allowed:
                 self.allowed_monsters_listbox.selection_set(i)
+                selected_count += 1
+        print(f"[EDITOR] Selected {selected_count} monsters in listbox")  # Debug
     
     def add_level(self):
         """Add a new level"""
