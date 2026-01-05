@@ -45,7 +45,7 @@ impl Dungeon {
         let mut rooms: Vec<Room> = Vec::new();
         const MAX_ATTEMPTS: usize = 200; // Limit attempts to avoid infinite loops
 
-        // Generate rooms with varied sizes (some bigger) and allow them to be closer together
+        // Generate rooms with varied sizes (some bigger) and place them closer together
         let mut attempts = 0;
         while rooms.len() < num_rooms && attempts < MAX_ATTEMPTS {
             attempts += 1;
@@ -59,8 +59,22 @@ impl Dungeon {
                 (rng.gen_range(5..=10), rng.gen_range(5..=10))
             };
             
-            let x = rng.gen_range(1..(width - room_width - 1));
-            let y = rng.gen_range(1..(height - room_height - 1));
+            // Prefer placing rooms near existing rooms for tighter clusters
+            let (x, y) = if !rooms.is_empty() && rng.gen_bool(0.6) {
+                // 60% chance to place near an existing room
+                let anchor_room = &rooms[rng.gen_range(0..rooms.len())];
+                let offset_range = 15; // Max distance from anchor room
+                let base_x = anchor_room.x as i32 + (anchor_room.width as i32 / 2) - (room_width as i32 / 2);
+                let base_y = anchor_room.y as i32 + (anchor_room.height as i32 / 2) - (room_height as i32 / 2);
+                let offset_x = rng.gen_range(-offset_range..=offset_range);
+                let offset_y = rng.gen_range(-offset_range..=offset_range);
+                let x = (base_x + offset_x).max(1).min((width - room_width - 1) as i32) as usize;
+                let y = (base_y + offset_y).max(1).min((height - room_height - 1) as i32) as usize;
+                (x, y)
+            } else {
+                // 40% chance for random placement
+                (rng.gen_range(1..(width - room_width - 1)), rng.gen_range(1..(height - room_height - 1)))
+            };
 
             let room = Room {
                 x,
@@ -69,8 +83,8 @@ impl Dungeon {
                 height: room_height,
             };
             
-            // Check for overlaps - allow rooms to be closer (minimum 2 tile gap instead of complete separation)
-            let min_gap = 2; // Minimum gap between rooms
+            // Check for overlaps - allow rooms to be closer (minimum 1 tile gap for corridors)
+            let min_gap = 1; // Minimum gap between rooms (reduced for tighter layouts)
             let mut overlaps = false;
             for existing_room in &rooms {
                 // Check if rooms are too close (with minimum gap)
