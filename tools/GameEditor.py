@@ -2149,10 +2149,18 @@ class GameObjectEditor:
             level_num = level.get("level_number", 0)
             url = f"http://localhost:3000/api/map?level={level_num}"
             try:
-                with urllib.request.urlopen(url, timeout=5) as response:
+                self.log_status(f"Requesting map from server...", "info")
+                with urllib.request.urlopen(url, timeout=30) as response:
+                    self.log_status(f"Received response, parsing...", "info")
                     data = json.loads(response.read().decode())
+                    self.log_status(f"Map generated successfully!", "success")
             except urllib.error.URLError as e:
-                self.log_status(f"Failed to connect to server: {e}. Make sure the server is running.", "error")
+                self.log_status(f"Failed to connect to server: {e}. Make sure the server is running on port 3000.", "error")
+                return
+            except Exception as e:
+                self.log_status(f"Error generating map: {e}", "error")
+                import traceback
+                traceback.print_exc()
                 return
             
             # Parse the response
