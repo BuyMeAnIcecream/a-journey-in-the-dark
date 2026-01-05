@@ -249,7 +249,7 @@ function render() {
                 const spriteY = chest.sprite_y;
                 
                 // Debug: log to verify we're using the right coordinates
-                // console.log(`Closed chest at (${chestX}, ${chestY}): sprite=(${spriteX}, ${spriteY}), open_sprite=(${chest.open_sprite_x}, ${chest.open_sprite_y}), is_open=${chest.is_open}`);
+                console.log(`Closed chest at (${chestX}, ${chestY}): sprite=(${spriteX}, ${spriteY}), open_sprite=(${chest.open_sprite_x}, ${chest.open_sprite_y}), is_open=${chest.is_open}`);
                 
                 if (spriteX !== undefined && spriteY !== undefined && 
                     chestSpriteSheet && chestSpriteSheet.complete) {

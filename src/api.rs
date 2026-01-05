@@ -6,6 +6,19 @@ use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
 use tokio::sync::broadcast;
+use std::fs::OpenOptions;
+use std::io::Write;
+
+fn log_debug(msg: &str) {
+    eprintln!("{}", msg);
+    if let Ok(mut file) = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open("server_debug.log")
+    {
+        let _ = writeln!(file, "{}", msg);
+    }
+}
 
 use crate::game_state::GameState;
 use crate::message::{GameMessage, PlayerCommand};
@@ -155,6 +168,8 @@ pub fn game_state_to_update(
             let (sprite_x, sprite_y) = if let Some(obj) = chest_obj {
                 let before_sprites = obj.get_interactable_sprites(false);
                 if let Some(sprite) = before_sprites.first() {
+                    eprintln!("[CHEST] Chest {} at ({}, {}): closed sprite = ({}, {}), is_open = {}", 
+                        chest.id, chest.x, chest.y, sprite.x, sprite.y, chest.is_open);
                     (sprite.x, sprite.y)
                 } else {
                     eprintln!("WARNING: Chest object '{}' has no sprites for before state at ({}, {})", 
@@ -290,17 +305,29 @@ pub async fn generate_map_endpoint(
     // Get level config if level parameter is provided
     let level_config = if let Some(level_str) = params.get("level") {
         if let Ok(level_num) = level_str.parse::<u32>() {
-            config.levels.iter().find(|l| l.level_number == level_num)
+            log_debug(&format!("[MAP API] Looking for level {} in {} levels", level_num, config.levels.len()));
+            let found = config.levels.iter().find(|l| l.level_number == level_num);
+            if let Some(level) = found {
+                log_debug(&format!("[MAP API] Found level {}: min_rooms={}, max_rooms={}", 
+                    level.level_number, level.min_rooms, level.max_rooms));
+            } else {
+                log_debug(&format!("[MAP API] Level {} not found! Available levels: {:?}", 
+                    level_num, config.levels.iter().map(|l| l.level_number).collect::<Vec<_>>()));
+            }
+            found
         } else {
+            log_debug(&format!("[MAP API] Invalid level number: {}", level_str));
             None
         }
     } else {
+        log_debug("[MAP API] No level parameter provided, using defaults");
         None
     };
     
     let mut game_state = if let Some(level) = level_config {
         GameState::new_with_level(tile_registry, object_registry, Some(level))
     } else {
+        log_debug("[MAP API] Using default map generation (8-12 rooms)");
         GameState::new_with_registry(tile_registry, object_registry)
     };
     

@@ -5,6 +5,19 @@ use crate::entity::{Entity, EntityController};
 use crate::consumable::Consumable;
 use crate::chest::Chest;
 use crate::config::LevelConfig;
+use std::fs::OpenOptions;
+use std::io::Write;
+
+fn log_debug(msg: &str) {
+    eprintln!("{}", msg);
+    if let Ok(mut file) = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open("server_debug.log")
+    {
+        let _ = writeln!(file, "{}", msg);
+    }
+}
 
 pub struct MapGenerator;
 
@@ -17,12 +30,15 @@ impl MapGenerator {
     ) -> (Dungeon, Vec<Entity>, Vec<Consumable>, Vec<Chest>, Option<(usize, usize)>) {
         // Use level config for room count, or defaults
         let (min_rooms, max_rooms) = if let Some(level) = level_config {
+            log_debug(&format!("[MAP GEN] Using level config: min_rooms={}, max_rooms={}", level.min_rooms, level.max_rooms));
             (level.min_rooms, level.max_rooms)
         } else {
+            log_debug("[MAP GEN] No level config, using defaults: min_rooms=8, max_rooms=12");
             (8, 12)  // Default values
         };
         
         let dungeon = Dungeon::new_with_room_count(80, 50, tile_registry, min_rooms, max_rooms);
+        log_debug(&format!("[MAP GEN] Generated dungeon with {} rooms", dungeon.rooms.len()));
         
         // Find first floor tile for player spawn
         let mut player_x = 1;
