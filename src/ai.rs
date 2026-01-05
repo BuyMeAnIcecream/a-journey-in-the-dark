@@ -49,15 +49,16 @@ pub fn process_ai_turns(
         }
         
         if let Some((target_x, target_y)) = nearest_player {
-            // Use pathfinding to find the best move towards player
-            if let Some((dx, dy)) = find_path_step(entities, dungeon, ai_x, ai_y, target_x, target_y, ai_idx) {
-                let new_x = (ai_x as i32 + dx) as usize;
-                let new_y = (ai_y as i32 + dy) as usize;
-                
-                // Check if there's a player at target position (attack)
+            // Check if player is adjacent (orthogonal only, no diagonal attacks)
+            let dx = target_x as i32 - ai_x as i32;
+            let dy = target_y as i32 - ai_y as i32;
+            let is_adjacent_orthogonal = (dx.abs() == 1 && dy == 0) || (dx == 0 && dy.abs() == 1);
+            
+            // If player is orthogonally adjacent, attack directly
+            if is_adjacent_orthogonal {
                 if let Some(target_idx) = entities.iter().position(|e| {
-                    e.x == new_x && 
-                    e.y == new_y && 
+                    e.x == target_x && 
+                    e.y == target_y && 
                     e.is_alive() &&
                     e.controller == EntityController::Player
                 }) {
@@ -65,8 +66,14 @@ pub fn process_ai_turns(
                     if let Some(msg) = attack_entity(entities, ai_idx, target_idx, object_registry, consumables) {
                         messages.push(msg);
                     }
-                } else {
-                    // Move towards player using pathfinding
+                }
+            } else {
+                // Use pathfinding to find the best move towards player
+                if let Some((dx, dy)) = find_path_step(entities, dungeon, ai_x, ai_y, target_x, target_y, ai_idx) {
+                    let new_x = (ai_x as i32 + dx) as usize;
+                    let new_y = (ai_y as i32 + dy) as usize;
+                    
+                    // Only move if not attacking (we already checked for adjacent attacks above)
                     move_entity(entities, dungeon, ai_idx, dx, dy);
                 }
             }

@@ -63,11 +63,16 @@ impl MapGenerator {
         // Spawn monsters in each room
         let monster_templates = if let Some(level) = level_config {
             // Filter monsters to only those allowed in this level
-            let allowed: std::collections::HashSet<&str> = level.allowed_monsters.iter().map(|s| s.as_str()).collect();
-            object_registry.get_monster_characters()
-                .into_iter()
-                .filter(|obj| allowed.contains(obj.id.as_str()))
-                .collect()
+            if level.allowed_monsters.is_empty() {
+                // If allowed_monsters is empty, use all monsters
+                object_registry.get_monster_characters()
+            } else {
+                let allowed: std::collections::HashSet<&str> = level.allowed_monsters.iter().map(|s| s.as_str()).collect();
+                object_registry.get_monster_characters()
+                    .into_iter()
+                    .filter(|obj| allowed.contains(obj.id.as_str()))
+                    .collect()
+            }
         } else {
             // Use all monsters if no level config
             object_registry.get_monster_characters()
@@ -215,9 +220,12 @@ impl MapGenerator {
                 (dungeon.rooms.len() as f64 * 0.5) as u32
             };
             
-            // Collect all valid chest positions across all rooms
-            let mut all_valid_positions = Vec::new();
-            for room in &dungeon.rooms {
+            // Collect valid chest positions, ensuring max 1 chest per room
+            use std::collections::HashMap;
+            let mut room_positions: HashMap<usize, Vec<(usize, usize)>> = HashMap::new();
+            
+            for (room_idx, room) in dungeon.rooms.iter().enumerate() {
+                let mut valid_positions = Vec::new();
                 // Find all walkable positions within the room
                 for dy in 0..room.height {
                     for dx in 0..room.width {
@@ -230,34 +238,43 @@ impl MapGenerator {
                                     let occupied_by_entity = entities.iter().any(|e| e.x == x && e.y == y);
                                     let occupied_by_stairs = stairs_pos.map_or(false, |(sx, sy)| sx == x && sy == y);
                                     let occupied_by_consumable = consumables.iter().any(|c: &Consumable| c.x == x && c.y == y);
-                                    if !occupied_by_entity && !occupied_by_stairs && !occupied_by_consumable {
-                                        all_valid_positions.push((x, y));
+                                    let occupied_by_chest = chests.iter().any(|c: &Chest| c.x == x && c.y == y);
+                                    if !occupied_by_entity && !occupied_by_stairs && !occupied_by_consumable && !occupied_by_chest {
+                                        valid_positions.push((x, y));
                                     }
                                 }
                             }
                         }
                     }
                 }
+                if !valid_positions.is_empty() {
+                    room_positions.insert(room_idx, valid_positions);
+                }
             }
             
-            // Shuffle and select positions for chests
+            // Select one position per room (up to target_chest_count rooms)
             use rand::seq::SliceRandom;
-            all_valid_positions.shuffle(&mut rng);
-            let chests_to_spawn = target_chest_count.min(all_valid_positions.len() as u32) as usize;
+            let mut room_indices: Vec<usize> = room_positions.keys().cloned().collect();
+            room_indices.shuffle(&mut rng);
+            let rooms_to_use = target_chest_count.min(room_indices.len() as u32) as usize;
             
-            for i in 0..chests_to_spawn {
-                let (chest_x, chest_y) = all_valid_positions[i];
-                let chest_template = chest_templates[rng.gen_range(0..chest_templates.len())];
-                
-                let chest = Chest {
-                    id: format!("chest_{}", chest_id_counter),
-                    x: chest_x,
-                    y: chest_y,
-                    object_id: chest_template.id.clone(),
-                    is_open: false,
-                };
-                chests.push(chest);
-                chest_id_counter += 1;
+            for i in 0..rooms_to_use {
+                let room_idx = room_indices[i];
+                if let Some(positions) = room_positions.get(&room_idx) {
+                    if let Some(&(chest_x, chest_y)) = positions.choose(&mut rng) {
+                        let chest_template = chest_templates[rng.gen_range(0..chest_templates.len())];
+                        
+                        let chest = Chest {
+                            id: format!("chest_{}", chest_id_counter),
+                            x: chest_x,
+                            y: chest_y,
+                            object_id: chest_template.id.clone(),
+                            is_open: false,
+                        };
+                        chests.push(chest);
+                        chest_id_counter += 1;
+                    }
+                }
             }
         }
         

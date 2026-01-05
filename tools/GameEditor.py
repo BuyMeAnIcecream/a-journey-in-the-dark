@@ -2157,6 +2157,14 @@ class GameObjectEditor:
             entities_data = data.get("entities", [])
             self.level_map_entities = []
             for entity in entities_data:
+                # Convert controller enum to string if needed
+                controller = entity.get("controller", "AI")
+                if isinstance(controller, dict):
+                    # Handle serde enum format
+                    controller = list(controller.keys())[0] if controller else "AI"
+                elif not isinstance(controller, str):
+                    controller = str(controller)
+                
                 self.level_map_entities.append({
                     "x": entity.get("x", 0),
                     "y": entity.get("y", 0),
@@ -2164,7 +2172,7 @@ class GameObjectEditor:
                     "sprite_x": entity.get("sprite_x", 0),
                     "sprite_y": entity.get("sprite_y", 0),
                     "sprite_sheet": entity.get("sprite_sheet"),
-                    "controller": entity.get("controller", "AI"),
+                    "controller": controller,
                 })
             
             # Store stairs position
